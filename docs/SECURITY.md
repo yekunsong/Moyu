@@ -1,40 +1,40 @@
-# 安全模型
+# Security model
 
-## 1. 边界与信任假设
+## 1. Boundaries and trust assumptions
 
-- **bridge 是本机回环上的高权限面**：它能 `Runtime.evaluate` 任意页面脚本，等价于一个受限的代码执行通道。只绑 `127.0.0.1`，每次启动生成 24 字节随机 bearer token，经子进程环境变量传入（不进命令行、不落盘）。所有请求先校验 token，失败一律 401。
-- **页面内容全不可信**：快照里的文字、链接、表单名都可能由攻击者控制。Transom 不把页面文本当指令；模型看到的每个快照都带来源提示，动作前必须经过权限层。
-- **人比模型宽**：人在面板上的点击不做逐次确认，因为人看得到页面；模型发起的写动作按 `writePolicy` 确认。两者都受协议/主机白名单约束。
-- **Chrome 用一次性 profile**：`mkdtemp` 下的独立 `--user-data-dir`，不读取用户日常浏览器的 cookie、密码库、扩展。会话结束删除（尽力）。
+- **The bridge is a high-privilege surface on the loopback interface.** It can `Runtime.evaluate` arbitrary page script, which is equivalent to a constrained code-execution channel. It binds `127.0.0.1` only, generates a fresh 24-byte random bearer token at every start, and passes it through the child's environment (never on the command line, never on disk). Every request validates the token; failures are 401.
+- **All page content is untrusted.** Text, links and form names in a snapshot can be attacker-controlled. Transom never treats page text as instructions; every snapshot carries a provenance banner, and every action passes through the permission layer.
+- **People are trusted more than models.** Human clicks in the pane execute without per-action confirmation because the person can see the page; model-initiated writes are confirmed according to `writePolicy`. Both are bound by the scheme/host allowlists.
+- **Chrome uses a throwaway profile.** A private `--user-data-dir` under `mkdtemp`; no access to the user's daily cookies, password store or extensions. Removed on stop (best effort).
 
-## 2. 攻击面与对策
+## 2. Attack surface and mitigations
 
-| 面 | 风险 | 对策 |
+| Surface | Risk | Mitigation |
 |---|---|---|
-| bridge HTTP | 本机其他进程调用 `/act` | 随机 token；只绑回环；token 仅存于子进程 env 与插件内存 |
-| 页面脚本 | 通过 DOM 文本诱导模型点外链、填表、提交 | 快照标注为非指令来源；导航前后校验协议/主机；写动作确认；审计可回看 |
-| 导航 | `javascript:` / `data:` / `file:` 读取本机文件 | 仅 http/https；`file:` 一律拒绝；主机白名单 |
-| 表单 | 密码泄露进快照 | 密码字段（含大小写变体）的 value 固定为 `••••`，且不从 value 取无障碍名 |
-| 点击 | 点到不可见/覆盖层元素 | 快照只收可见节点；动作前 `scrollIntoView` + `elementFromPoint` 命中测试，被遮挡返回 `covered` 而不是假成功；CDP 真实鼠标事件 |
-| 进程 | 残留 Chrome 进程树 | bridge 收 `/stop` → `Browser.close` → 杀子进程；supervisor 退避重启；空闲 30 分钟自停 |
-| 审计 | 无痕操作、表单值泄露 | 人/模型动作同一队列，成功失败都入账；`fill` 只记 ref 与字符数，不记文本；`$.store` 持久 2000 条 |
-| 引擎接口 | early access 变更 | 所有 `$` 使用集中在 `hooks/main.tsx` 内的 `Ops` 字面量与 `engine/` 一层 |
+| Bridge HTTP | Another local process calls `/act` | Random bearer token; loopback only; token exists only in the child env and plugin memory; browser `Origin` rejected |
+| Page script | DOM text tricks the model into clicking external links, filling forms or submitting | Snapshots are labelled untrusted; navigation validates scheme/host; writes are confirmed; audit is reviewable |
+| Navigation | `javascript:` / `data:` / `file:` reads local files | Only http/https; `file:` always denied; host allowlist |
+| Forms | Passwords leak into snapshots | Password fields (including case variants) always report `••••` and never use their value as an accessible name |
+| Clicking | Hit an invisible or overlaid element | Snapshots include visible nodes only; `scrollIntoView` plus an `elementFromPoint` hit test returns `covered` instead of a false success; CDP dispatches real mouse events |
+| Process | Orphaned Chrome process tree | Bridge `/stop` → `Browser.close` → kill child; supervisor backoff; idle shutdown after 30 minutes |
+| Audit | Untracked actions or leaked form values | One queue for people and models, successes and failures both recorded; `fill` records only ref and character count; `$.store` keeps 2000 entries |
+| Engine API | Early-access changes | All `$` usage is confined to the `Ops` literal in `hooks/main.tsx` and the `engine/` layer |
 
-## 3. 明确不防的东西
+## 3. Explicit non-goals
 
-- **链接跳转**：模型点击一个指向白名单外主机的链接时，跳转发生在动作内部，不经过 `navigate` 的白名单分支。`confirm`/`once` 策略下这次点击本身要确认；`auto` 策略等于放弃这层保护。需要严格时不使用 `auto`。
-- 页面自身向第三方发送数据（正常浏览器行为）。
-- 本机被入侵后直接读 bridge 子进程环境变量。
-- 模型在**已确认**的页面上做出有害但用户同意的操作。
-- 视觉档截图的内容（等同于人眼看到屏幕）。
+- **Link navigations.** When the model clicks a link to a host outside the allowlist, the navigation happens inside the click action and does not pass through the `navigate` allowlist branch. Under `confirm`/`once` the click itself is confirmed; `auto` gives that protection up. Do not use `auto` when this matters.
+- A page sending data to third parties (normal browser behaviour).
+- An attacker who already controls the machine and can read the bridge child's environment.
+- A model performing a harmful-but-consented action on a page the person approved.
+- The content of a visual-tier screenshot (equivalent to what a person sees on screen).
 
-## 4. 检查表（发布前）
+## 4. Release checklist
 
-- [ ] `claude plugin validate .` 通过，无 gating hook 缺 `.catch` 的意外项。
-- [ ] `bridge` 只 `listen(0, '127.0.0.1')`。
-- [ ] 所有 POST 路由校验 `Authorization: Bearer`。
-- [ ] 导航只放行 `http:`/`https:`。
-- [ ] 密码字段值遮蔽。
-- [ ] 审计覆盖 `snapshot`、`act`、`screenshot`、拒绝与失败。
-- [ ] 临时 profile 在 `stop` 后删除。
-- [ ] 文档声明页面文本不可信。
+- [ ] `claude plugin validate .` passes; no unexpected gating hook lacks `.catch`.
+- [ ] The bridge only calls `listen(0, '127.0.0.1')`.
+- [ ] Every POST route validates `Authorization: Bearer`.
+- [ ] Navigation allows only `http:`/`https:`.
+- [ ] Password values are masked.
+- [ ] Audit covers `snapshot`, `act`, `screenshot`, denials and failures.
+- [ ] Temporary profiles are removed after `stop`.
+- [ ] Documentation states that page text is untrusted.

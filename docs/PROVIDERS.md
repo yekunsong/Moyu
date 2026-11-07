@@ -1,8 +1,10 @@
-# Provider 作者指南
+# Provider author guide
 
-第一版只有 `browser` 一个 provider，但合同按多 provider 写。新增一个 provider 要做四件事：实现合同、声明能力、声明权限元数据、接进 hub。
+v0.1 ships a single `browser` provider, but the contract is written for many. Adding a provider means four things: implement the contract, declare capabilities, declare permission metadata, and wire it into the hub.
 
-## 1. 合同（`providers/browser/contract.ts` 是参考实现）
+## 1. Contract
+
+`providers/browser/contract.ts` is the reference implementation.
 
 ```ts
 type Provider = {
@@ -30,11 +32,11 @@ type Provider = {
 
 ```ts
 type SnapshotNode = {
-  ref: string          // 稳定到下一次快照/导航；动作前校验，失效返回 stale
+  ref: string          // stable until the next snapshot/navigation; checked before acting
   role: string         // button/link/textbox/heading/text/...
-  name: string         // 已压空白、截断
+  name: string         // whitespace-collapsed and truncated
   depth: number
-  value?: string       // 密码遮蔽
+  value?: string       // passwords masked
   interactive?: boolean
   submits?: boolean
   state?: { disabled?; checked?; expanded?; selected?; focused? }
@@ -42,64 +44,64 @@ type SnapshotNode = {
 }
 ```
 
-硬要求：
+Hard requirements:
 
-1. **ref 必须来自应用自身的对象身份**，不能是坐标或数组下标。浏览器用 `WeakMap<Element,string>`，其他 provider 用协议里的稳定 id。
-2. **ref 失效必须显式报告**（`ActResult.stale = true`），让面板重取快照；不能静默点到别的东西。
-3. **快照默认只含可见区**，并提供 `scope: 'document'` 的整页请求；两者都要服从 `maxChars`。
-4. **值里不放凭证**；密码或 token 字段给占位符。
+1. **A ref must derive from the application's own object identity**, never a coordinate or an array index. The browser provider uses `WeakMap<Element, string>`; other providers should use a stable id from their protocol.
+2. **An invalid ref must be reported explicitly** (`ActResult.stale = true`) so the pane can retake a snapshot. Never silently act on a different element.
+3. **Snapshots contain the visible region by default** and support a full-page request through `scope: 'document'`. Both obey `maxChars`.
+4. **Never put credentials in values.** Password and token fields get a placeholder.
 
-### Action
+### Actions
 
-现有动作集合：`click` / `fill` / `select` / `focus` / `hover` / `press` / `scroll` / `navigate` / `back` / `forward` / `reload`。能力不足时：
+The action set: `click` / `fill` / `select` / `focus` / `hover` / `press` / `scroll` / `navigate` / `back` / `forward` / `reload`. When capabilities are missing:
 
-- 不支持指针：隐藏面板点击，只留动作工具。
-- 不支持键盘：不渲染键盘条。
-- 支持的子集在 `capabilities` 里声明，`hub/negotiate.ts` 负责降级。
+- No pointer: hide pane row clicks, keep action tools.
+- No keyboard: do not render the keyboard strip.
+- Declare the supported subset in `capabilities`; `hub/negotiate.ts` handles degradation.
 
-`ActResult` 必须带 `message`；成功且页面可能变化时 `changed: true`，hub 会据此刷新。
+`ActResult` must carry `message`. On success where the application may have changed, set `changed: true` so the hub refreshes.
 
-## 2. 传输
+## 2. Transport
 
-推荐沿用 browser 的模式：
+The browser provider's pattern is recommended:
 
-- 一个受监督的本地子进程（`engine/supervisor.ts`），stdout 首行 `{"ready":true,"port":N}`。
-- 回环 HTTP + 随机 bearer token。
-- 端点至少：`/health`、`/snapshot`、`/act`、`/stop`。
+- One supervised local child process (`engine/supervisor.ts`) whose first stdout line is `{"ready":true,"port":N}`.
+- Loopback HTTP with a random bearer token.
+- At least `/health`, `/snapshot`, `/act`, `/stop`.
 
-不要假设插件模块里有 Node、DOM 或 PTY：`spawn` 的 stdin 一次性、没有 PTY，交互程序必须有自带协议。
+Do not assume Node, DOM or a PTY inside the plugin module. `spawn` stdin is one-shot and there is no PTY; interactive programs must expose their own protocol.
 
-## 3. 权限
+## 3. Permissions
 
-在 `hub/permissions.ts` 的 `classify()` 里补动作分级（读 / 写 / 提交），在 `decide()` 里补协议与目标白名单。默认拒绝未知协议；写动作默认确认。
+Extend `classify()` in `hub/permissions.ts` with the action level (read / write / submit), and `decide()` with scheme and target allowlists. Unknown schemes are denied; writes are confirmed by default.
 
-## 4. 渲染
+## 4. Rendering
 
-文本档直接产出 `SnapshotNode[]` 就够；`hooks/main.tsx` 的 `projectRows` 会把它们变成按钮和文本。视觉档可选：实现 `raster()`，返回 `columns * rows` 个 u32 三元组 `[码点, 前景, 背景]` 的 base64。
+For the text tier, returning `SnapshotNode[]` is enough: `projectRows` in `hooks/main.tsx` turns it into buttons and text. The visual tier is optional: implement `raster()` returning base64 of `columns * rows` u32 triplets `[codePoint, foreground, background]`.
 
-## 4.1 工具结果的形状（实测）
+## 4.1 Tool result shape (measured)
 
-`$.tool.register` 声明的工具没有 output schema 时，`tool.call` 的答复里 `result` 必须是**纯文本字符串**：
+For a tool registered with `$.tool.register` and no output schema, `result` in the `tool.call` answer must be a **plain string**:
 
 ```ts
 return { result: 'ok: clicked e12', text: 'ok: clicked e12' }
 ```
 
-返回 MCP 风格的 `{ content: [{ type: 'text', ... }] }` 会被 2.1.319 判为
-`does not match its output shape: invalid_union … expected string, received object`。
-需要结构化数据时把它序列化成文本（或给工具声明 output schema，若该版本支持）。
+Returning MCP-style `{ content: [{ type: 'text', ... }] }` is rejected by 2.1.319 with
+`does not match its output shape: invalid_union … expected string, received object`.
+Serialize structured data into text (or declare an output schema if the build supports it).
 
-## 5. 测试
+## 5. Testing
 
-1. 纯逻辑测试放在 `tests/*.test.ts`（`claude plugin test .`）。
-2. 子进程协议测试用 `node:test`，仿照 `tests/bridge/bridge.test.mjs`。
-3. 至少覆盖：快照结构、点击/填写、stale ref、协议拒绝、进程停止。
-4. 在 `tests/helpers.ts` 里给 hub 加一个 fake 端点，保证插件测试不依赖真实进程。
+1. Pure logic tests go in `tests/*.test.ts` (`claude plugin test .`).
+2. Child-protocol tests use `node:test`, modelled on `tests/bridge/bridge.test.mjs`.
+3. Cover at least: snapshot structure, click/fill, stale refs, scheme refusal, process stop.
+4. Add a fake endpoint to `tests/helpers.ts` so plugin tests never depend on a real process.
 
-## 6. 接入顺序
+## 6. Integration order
 
-1. `providers/<name>/contract.ts`（能力与元数据）
-2. `providers/<name>/client.ts`（Provider 实现）
-3. `hub/registry.ts` 注册（第一版只有 browser，直接 new）
-4. `hooks/main.tsx` 增加命令与工具命名空间
-5. `types/index.d.ts` 若新增持久状态，补 `PluginState`
+1. `providers/<name>/contract.ts` — capabilities and metadata
+2. `providers/<name>/client.ts` — the Provider implementation
+3. Instantiate it in `hub/hub.ts` (v0.1 has only the browser, constructed directly)
+4. Add commands and a tool namespace in `hooks/main.tsx`
+5. If it introduces persistent state, extend `PluginState` in `types/index.d.ts`
