@@ -1,6 +1,6 @@
 # Roadmap 0.2 — phased plan
 
-Status: approved; A1 ✅, A2 ✅, B1 ✅, B2 ✅, C1 ✅, L1 ✅, U1 ✅, U2 next
+Status: complete (2026-11-08); A1 ✅, A2 ✅, B1 ✅, B2 ✅, C1 ✅, L1 ✅, U1 ✅, U2 ✅
 Owner: maintainer (review + direction); implementation by worker agents
 Date: 2026-11-08
 

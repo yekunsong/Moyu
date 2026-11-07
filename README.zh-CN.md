@@ -71,14 +71,16 @@ Transom 把外部应用压成一对接口——`snapshot()` 读结构化状态�
 - **Provider 框架。** 能力协商、supervisor、白名单、渲染都在 hub；浏览器只是第一个适配器。
 - **默认受权限约束。** 只允许 http(s)、主机白名单（localhost 恒允许）、模型写操作逐次确认（或 `once`/`auto`）、只接受精确的 Allow 标签、失败即拒绝。
 - **全量审计。** 人与模型动作进同一环形缓冲并持久化到 `$.store`；填写内容脱敏。
-- **两档渲染。** 文本档（任何终端）与彩色格档（半格块 Raster，24 位色）；窄面板降级为摘要行。
-- **崩溃隔离。** 受监督的本地 bridge 独占无头 Chromium；健康检查、退避重启、空闲自停、关闭时清理进程树。
+- **三档渲染。** 文本档（按钮、输入框、分区，任何终端）、彩色格档（半格块 Raster，24 位色）与 HQ 图像档（kitty、Ghostty、WezTerm 上的真实 PNG 画面）；窄面板降级为摘要行。
+- **行内编辑与结构。** 文本框和下拉框原地编辑；行按页面标题分区，带状态栏与分块翻页。
+- **崩溃隔离且可移植。** 受监督的本地 bridge 独占无头 Chromium；健康检查、退避重启、空闲自停、进程树清理、Linux/macOS 浏览器发现，测试已在 WSL 验证。
+- **接管模式。** `/transom attach <port>` 镜像你已运行的 Chrome（连同登录态），关闭时只断开、不退出浏览器。
 - **模型端易用性。** 增量快照、`browser_find`、`browser_wait`，以及对话框自动处理（alert 接受；confirm/prompt 拒绝）。
 - **页面内容按不可信数据处理。** 快照带显式横幅；页面字符串在进对话框前剥掉控制字符；点击前做 `elementFromPoint` 命中测试，遮挡会报告 `covered`。
 
 ## 状态
 
-v0.1，early access。Claude Code 的 function hooks 接口处于 early access，版本间可能变化。M0–M5 已完成；设计与偏差见 [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md)。
+v0.2.0，early access。Claude Code 的 function hooks 接口处于 early access，版本间可能变化。M0–M5 与 0.2 的全部阶段（文本 UI、HQ 图像档、接管模式、Linux、模型易用性、安全打磨）均已完成；设计与偏差见 [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) 与 [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md)。
 
 ## 依赖
 

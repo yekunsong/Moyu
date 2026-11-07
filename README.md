@@ -71,14 +71,16 @@ Moving the window into the terminal is a side effect. The product is **structure
 - **Provider framework.** Capability negotiation, supervisor, allowlists and rendering live in the hub; the browser is the first adapter, not the only possible one.
 - **Permissioned by default.** http(s)-only navigation, host allowlist (`localhost` always), model writes confirmed per action (or `once`/`auto`), exact-label approval, fail-closed confirmations.
 - **Audited.** Human and model actions land in the same ring buffer and in `$.store`; fill text is redacted.
-- **Two rendering tiers.** Text (buttons and rows, any terminal) and colored cells (half-block Raster, 24-bit color). Degrades to a summary line in narrow panes.
-- **Crash-isolated.** A supervised local bridge owns headless Chromium; health checks, backoff restarts, idle shutdown, and process-tree cleanup on close.
+- **Three rendering tiers.** Text (buttons, inputs and sections, any terminal), colored cells (half-block Raster, 24-bit color) and HQ images (real PNG frames on kitty, Ghostty, WezTerm). Degrades to a summary line in narrow panes.
+- **Inline editing and structure.** Text fields and selects edit in place; rows group under page headings with a status bar and block navigation.
+- **Crash-isolated and portable.** A supervised local bridge owns headless Chromium; health checks, backoff restarts, idle shutdown, process-tree cleanup, Linux/macOS discovery and WSL-verified tests.
+- **Attach mode.** `/transom attach <port>` mirrors a Chrome you already run, with its logins, and detaches without closing it.
 - **Model ergonomics.** Delta snapshots, `browser_find`, `browser_wait`, and automatic dialog handling (alerts accepted; confirms/prompts dismissed).
 - **Untrusted page content is treated as data.** Snapshots start with an explicit banner; page strings are control-character-stripped before dialogs; clicks hit-test `elementFromPoint` and report covered targets.
 
 ## Status
 
-v0.1, early access. The Claude Code function-hooks API is early access and may change between releases. Milestones M0–M5 are complete; see [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for the design, deviations and verified findings. The phased 0.2 plan (text UI, HQ image tier, attach mode, Linux, UX fixes) is in [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md).
+v0.2.0, early access. The Claude Code function-hooks API is early access and may change between releases. Milestones M0–M5 and every 0.2 phase (text UI, HQ image tier, attach mode, Linux, model ergonomics, safety polish) are complete; see [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) and [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md) for the design, deviations and verified findings.
 
 ## Requirements
 

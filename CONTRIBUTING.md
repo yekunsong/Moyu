@@ -17,7 +17,7 @@ npm test
 1. `tsc --noEmit` (TypeScript 5.9 via `npx`)
 2. `claude plugin validate .`
 3. `claude plugin test .` — plugin tests against an in-memory fake bridge
-4. `node --test tests/bridge/bridge.test.mjs` — real headless Chrome against the demo app
+4. `npm run test:bridge` — real headless Chrome against the demo app, plus the browser-free portability checks
 
 Run a single suite with `npm run test:plugin` or `npm run test:bridge`.
 
