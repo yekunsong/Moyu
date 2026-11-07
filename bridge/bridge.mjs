@@ -297,6 +297,59 @@ async function health() {
   }
 }
 
+const DECODE_PNG = String.raw`
+(async args => {
+  const image = new Image()
+  image.src = 'data:image/png;base64,' + args.png
+  await image.decode()
+  const columns = args.columns
+  const rows = args.rows
+  const canvas = new OffscreenCanvas(columns, rows * 2)
+  const context = canvas.getContext('2d')
+  context.imageSmoothingEnabled = true
+  context.drawImage(image, 0, 0, columns, rows * 2)
+  const pixels = context.getImageData(0, 0, columns, rows * 2).data
+  const words = new Uint32Array(columns * rows * 3)
+  const at = (x, y) => (y * columns + x) * 4
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < columns; x++) {
+      const top = at(x, y * 2)
+      const bottom = at(x, y * 2 + 1)
+      const bg = (pixels[top] << 16) | (pixels[top + 1] << 8) | pixels[top + 2]
+      const fg = (pixels[bottom] << 16) | (pixels[bottom + 1] << 8) | pixels[bottom + 2]
+      const index = (y * columns + x) * 3
+      words[index] = 0x2584
+      words[index + 1] = fg
+      words[index + 2] = bg
+    }
+  }
+  const bytes = new Uint8Array(words.buffer)
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk))
+  }
+  return { cells: btoa(binary), columns, rows }
+})
+`
+
+async function raster(request) {
+  const width = Math.max(20, Math.min(Number(request.cols) || VIEW_COLS, 512))
+  const height = Math.max(5, Math.min(Number(request.rows) || VIEW_ROWS, 256))
+  await cmd('Emulation.setDeviceMetricsOverride', {
+    width: width * CELL_W,
+    height: height * CELL_H,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
+  const captured = await cmd('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: false,
+    fromSurface: true,
+  })
+  return await evalInPage(`(${DECODE_PNG})(${JSON.stringify({ png: captured.data, columns: width, rows: height })})`)
+}
+
 async function shot(request) {
   const width = Math.max(40, Math.min(Number(request.cols) || VIEW_COLS, 512))
   const height = Math.max(10, Math.min(Number(request.rows) || VIEW_ROWS, 256))
@@ -346,6 +399,7 @@ const ROUTES = {
     return { ok: true, url }
   },
   'POST /shot': async body => await shot(body),
+  'POST /raster': async body => await raster(body),
   'POST /stop': async () => {
     void shutdown(0)
     return { ok: true }

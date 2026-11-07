@@ -26,6 +26,7 @@ export type ViewModel = {
   last?: string
   audit: string[]
   scope: 'viewport' | 'document'
+  mode: 'text' | 'visual'
 }
 
 export const EMPTY_VIEW: ViewModel = {
@@ -36,6 +37,7 @@ export const EMPTY_VIEW: ViewModel = {
   truncated: 0,
   audit: [],
   scope: 'viewport',
+  mode: 'text',
 }
 
 const RECENT_KEY = 'recent.v1'

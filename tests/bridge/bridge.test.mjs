@@ -143,3 +143,25 @@ test('press dispatches keys', async () => {
   const result = await json('/act', { action: { kind: 'press', key: 'Enter' } })
   assert.equal(result.body.ok, true)
 })
+
+test('raster returns packed cells at the requested size', async () => {
+  await json('/navigate', { url: demo.url })
+  const { status, body } = await json('/raster', { cols: 40, rows: 12 })
+  assert.equal(status, 200)
+  assert.equal(body.columns, 40)
+  assert.equal(body.rows, 12)
+  const bytes = Buffer.from(body.cells, 'base64')
+  assert.equal(bytes.length, 40 * 12 * 12)
+  const words = new Uint32Array(bytes.buffer, bytes.byteOffset, 40 * 12 * 3)
+  assert.equal(words[0], 0x2584)
+  assert.ok(words[1] <= 0xffffff)
+  assert.ok(words[2] <= 0xffffff)
+})
+
+test('screenshot returns a PNG', async () => {
+  await json('/navigate', { url: demo.url })
+  const { status, body } = await json('/shot', { cols: 40, rows: 12 })
+  assert.equal(status, 200)
+  const bytes = Buffer.from(body.pngBase64, 'base64')
+  assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
+})

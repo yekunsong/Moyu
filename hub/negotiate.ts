@@ -25,5 +25,6 @@ export function negotiate(caps: Capabilities, cols: number, rows: number, isTmux
 }
 
 export function detectTmux(): boolean {
-  return typeof process === 'undefined' ? false : false
+  // The module environment has no process; a provider may pass its own probe.
+  return false
 }

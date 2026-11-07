@@ -94,4 +94,5 @@ export type Provider = {
   snapshot(request: SnapshotRequest): Promise<Snapshot>
   act(action: Action, context: ActContext): Promise<ActResult>
   screenshot(cols: number, rows: number): Promise<{ pngBase64: string; cols: number; rows: number }>
+  raster(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
 }

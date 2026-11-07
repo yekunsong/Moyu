@@ -102,6 +102,45 @@ test('a person press runs without a confirmation prompt', async ($, on) => {
   await ui.unmount()
 })
 
+test('visual mode draws a Raster and toggles back to text', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'visual' })
+  expect(bottom.fetches.some(one => one.includes('/raster')), 'raster fetch').toBe(true)
+  expect(await ui.find({ type: 'Raster', key: 'shot' }), 'raster').toBeDefined()
+  await ui.press({ key: 'visual' })
+  await bottom.advance(16)
+  expect(await ui.find({ type: 'Raster', key: 'shot' })).toBeUndefined()
+  expect(bottom.fetches.some(one => one.includes('/raster'))).toBe(true)
+  await ui.unmount()
+})
+
+test('a narrow pane reports degradation', async ($, on) => {
+  installBottom(on)
+  load(on)
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: { ...PANE, bodyColumns: 30 },
+    requestId: 'transom',
+    viewport: { columns: 30, rows: 20, isFullscreen: true },
+  })
+  expect(await ui.find({ type: 'Text', text: /degraded/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('a denied model write does not run', async ($, on) => {
   const bottom = installBottom(on)
   bottom.answerAsk('Deny')

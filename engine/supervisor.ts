@@ -44,9 +44,6 @@ export class Supervisor {
       }
       throw new Error('bridge did not become ready')
     }
-    if (this.#phase === 'failed' && Date.now() - this.#lastStart < 8000) {
-      await this.#$sleep(8000 - (Date.now() - this.#lastStart))
-    }
     return await this.#start()
   }
 
@@ -157,7 +154,7 @@ export class Supervisor {
         const wait = Math.min(8000, 250 * 2 ** this.#restarts)
         this.ops.after(wait, () => {
           void this.ensure().then(
-            () => this.#onFatal(''),
+            () => {},
             () => this.#onFatal(reason),
           )
         })
@@ -170,6 +167,11 @@ export class Supervisor {
   #shouldRestart(): boolean {
     // The user may have closed the pane on purpose; a stop() sets stopped.
     return this.#phase === 'failed'
+  }
+
+  /** Runs one health probe now; exposed for tests and `/transom status`. */
+  async probe(): Promise<void> {
+    await this.#check()
   }
 
   async stop(): Promise<void> {

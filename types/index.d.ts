@@ -17,6 +17,7 @@ export type TransomView = {
   last?: string
   audit: string[]
   scope: 'viewport' | 'document'
+  mode: 'text' | 'visual'
 }
 
 declare module 'claude-code' {

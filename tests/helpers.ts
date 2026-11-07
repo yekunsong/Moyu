@@ -17,7 +17,11 @@ export type Bottom = {
   page: FakePage
   asks: string[]
   fetches: string[]
+  spawns: number
+  failHealth: boolean
   answerAsk: (answer: string | undefined) => void
+  advance: (ms: number) => Promise<void>
+  readState: (key: string) => unknown
 }
 
 export function installBottom(on: On): Bottom {
@@ -25,10 +29,11 @@ export function installBottom(on: On): Bottom {
   const asks: string[] = []
   const fetches: string[] = []
   let askAnswer: string | undefined = 'Allow'
-
-  mock.clock(on)
+  let spawns = 0
+  const clock = mock.clock(on)
+  const bottomRef: { failHealth: boolean } = { failHealth: false }
   mock.store(on)
-  const states = new Map<string, unknown>()
+  const states = new Map<string, { value: unknown; version: number }>()
 
   const value = <T,>(v: T) => ({ value: v }) as never
 
@@ -49,12 +54,14 @@ export function installBottom(on: On): Bottom {
 
   on('state.get', ((_$: unknown, e: { plugin: string; key: string; id?: string }) => {
     const key = `${e.plugin}/${e.key}${e.id ? `#${e.id}` : ''}`
-    return value({ value: states.get(key), version: 1 })
+    const held = states.get(key)
+    return value({ value: held?.value, version: held?.version ?? 0 })
   }) as never)
   on('state.set', ((_$: unknown, e: { plugin: string; key: string; id?: string; value: unknown }) => {
     const key = `${e.plugin}/${e.key}${e.id ? `#${e.id}` : ''}`
-    states.set(key, e.value)
-    return value({ isSet: true, version: 2 })
+    const version = (states.get(key)?.version ?? 0) + 1
+    states.set(key, { value: e.value, version })
+    return value({ isSet: true, version })
   }) as never)
 
   on('process.spawn', (async function* () {
@@ -68,7 +75,22 @@ export function installBottom(on: On): Bottom {
     const path = new URL(e.url).pathname
     const body = init.body ? JSON.parse(init.body) : {}
     if (path === '/health') {
-      return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, url: page.url, title: page.title }) })
+      const ok = !bottomRef?.failHealth
+      return value({ status: ok ? 200 : 503, ok, headers: {}, text: JSON.stringify({ ok, url: page.url, title: page.title }) })
+    }
+    if (path === '/raster') {
+      const columns = Math.max(2, Math.min(Number(body.cols) || 2, 40))
+      const rows = Math.max(2, Math.min(Number(body.rows) || 2, 20))
+      const words = new Uint32Array(columns * rows * 3)
+      for (let i = 0; i < columns * rows; i++) {
+        words[i * 3] = 0x2584
+        words[i * 3 + 1] = 0x336699
+        words[i * 3 + 2] = 0xeeeeee
+      }
+      const bytes = new Uint8Array(words.buffer)
+      let binary = ''
+      for (const byte of bytes) binary += String.fromCharCode(byte)
+      return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ cells: btoa(binary), columns, rows }) })
     }
     if (path === '/snapshot') {
       const text = JSON.stringify({
@@ -100,8 +122,19 @@ export function installBottom(on: On): Bottom {
     page,
     asks,
     fetches,
+    get spawns() {
+      return spawns
+    },
+    get failHealth() {
+      return bottomRef.failHealth
+    },
+    set failHealth(next: boolean) {
+      bottomRef.failHealth = next
+    },
     answerAsk: answer => {
       askAnswer = answer
     },
+    advance: ms => clock.advance(ms),
+    readState: (key: string) => states.get(`transom/${key}`)?.value,
   }
 }

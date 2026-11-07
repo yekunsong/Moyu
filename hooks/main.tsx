@@ -3,11 +3,20 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Ops } from '../engine/ops'
 import { EMPTY_VIEW, Hub, normaliseKey, type ViewModel } from '../hub/hub'
+import { negotiate } from '../hub/negotiate'
 import { glyphFor, pressRow } from '../providers/browser/rows'
 import { registerToolSpecs, registerTools } from './tools'
 
 const PANE = 'transom'
 const view = atom({ plugin: 'transom', key: 'view' } as const, EMPTY_VIEW as ViewModel)
+// The last raster frame is a large blob; it lives for the drawing, not in
+// state. A reload drops it and the pane falls back to the text tier.
+let lastShot: { key: string; cells: string; columns: number; rows: number } = {
+  key: '',
+  cells: '',
+  columns: 0,
+  rows: 0,
+}
 
 let hub: Hub | undefined
 let demo: { url: string } | undefined
@@ -75,6 +84,7 @@ export const register: Register = (on, options) => {
       argumentHint: 'open <url> | demo | audit | close',
     })
     await update($, view, () => EMPTY_VIEW)
+    lastShot = { key: '', cells: '', columns: 0, rows: 0 }
     return next(e)
   })
 
@@ -176,7 +186,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE, surface: 'terminal' }, async ($, e) => {
-    const { Box, Text, Button, Client } = $.ui.resolve(e)
+    const { Box, Text, Button, Client, Raster } = $.ui.resolve(e)
     const ops: Ops = {
       root: $.plugin.root,
       ask: (question, options) => $.ui.ask(question, options),
@@ -198,14 +208,21 @@ export const register: Register = (on, options) => {
     // An explicit raw get lets the host rule see the noun; read() subscribes.
     await $.state.get({ plugin: 'transom', key: 'view' } as const)
     const model = await read($, view)
+    const shot = lastShot
     const width = Math.max(20, e.props.bodyColumns)
     const room = Math.max(3, (e.viewport?.rows ?? 28) - 9)
+    const rows = e.viewport?.rows ?? 28
+    const degradation = negotiate(transom.provider.meta.capabilities, width, rows, false)
 
     const header = (
       <Box flexDirection="column">
         <Text bold>Transom · {model.title || 'no page'}</Text>
         <Text dimColor>{model.url || 'open a URL with /transom open <url> · local hosts only by default'}</Text>
-        {model.last ? <Text dimColor>{model.last}</Text> : null}
+        {degradation.mode === 'summary' ? (
+          <Text color="yellow">degraded: {degradation.reason}</Text>
+        ) : model.last ? (
+          <Text dimColor>{model.last}</Text>
+        ) : null}
       </Box>
     )
 
@@ -228,6 +245,9 @@ export const register: Register = (on, options) => {
         </Button>
         <Button key="down" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: 4 }, 'person')}>
           <Text dimColor>pgdn</Text>
+        </Button>
+        <Button key="visual" plain onPress={() => showVisual($, ops, transom, width, rows, model.mode)}>
+          <Text dimColor>{model.mode === 'visual' ? 'text mode' : 'visual'}</Text>
         </Button>
         <Button key="enter" plain onPress={() => void transom.act({ kind: 'press', key: 'Enter' }, 'person')}>
           <Text dimColor>enter</Text>
@@ -264,6 +284,19 @@ export const register: Register = (on, options) => {
             </Button>
           ))}
           {toolbar}
+          <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
+        </Box>
+      )
+    }
+
+    if (model.mode === 'visual' && shot.cells && shot.columns > 0 && shot.rows > 0) {
+      const rasterRows = shot.rows
+      const rasterCols = shot.columns
+      return (
+        <Box flexDirection="column" width="100%">
+          {header}
+          {toolbar}
+          <Raster key="shot" columns={rasterCols} rows={rasterRows} cells={shot.cells} />
           <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
         </Box>
       )
@@ -307,6 +340,31 @@ export const register: Register = (on, options) => {
     if (hub) await hub.close()
     return next(e)
   })
+}
+
+async function showVisual(
+  $: EngineInterface,
+  ops: Ops,
+  transom: Hub,
+  width: number,
+  rows: number,
+  mode: 'text' | 'visual',
+): Promise<void> {
+  if (mode === 'visual') {
+    await update($, view, model => ({ ...model, mode: 'text' as const }))
+    void $.ui.invalidate('ui.render')
+    return
+  }
+  const cols = Math.max(20, Math.min(width, 160))
+  const height = Math.max(5, Math.min(rows - 9, 40))
+  try {
+    const shot = await transom.provider.raster(cols, height)
+    lastShot = { key: String(Date.now()), ...shot }
+    await update($, view, model => ({ ...model, mode: 'visual' as const, last: `visual ${shot.columns}x${shot.rows}` }))
+    void $.ui.invalidate('ui.render')
+  } catch (error) {
+    ops.toast(`visual: ${String((error as Error).message ?? error)}`)
+  }
 }
 
 async function showPane(ops: Ops): Promise<void> {
