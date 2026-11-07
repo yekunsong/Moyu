@@ -1,13 +1,28 @@
-export type ProbeState = {
-  last: string;
-  ticks: number;
-  lines: string[];
+export type ViewRow = {
+  ref: string
+  role: string
+  label: string
+  value?: string
+  flags?: string
+  submits?: boolean
+}
+
+export type TransomView = {
+  status: 'closed' | 'starting' | 'ready' | 'error'
+  url: string
+  title: string
+  error?: string
+  rows: ViewRow[]
+  truncated: number
+  last?: string
+  audit: string[]
+  scope: 'viewport' | 'document'
 }
 
 declare module 'claude-code' {
   interface PluginState {
     transom: {
-      probe: { last: string; ticks: number; lines: string[] }
+      view: TransomView
     }
   }
 }
