@@ -2,7 +2,7 @@
 
 > 在 Claude Code 会话里，为任意应用开一扇可看、可操作、可被模型调用的边窗。
 
-状态：调研完成，未开工
+状态：调研完成，实现中（方案见 `docs/IMPLEMENTATION-PLAN.md`）
 日期：2026-11-07
 目标平台：Claude Code CLI（function hooks / Mods，early access）
 工作目录：`D:/Study/transom`
@@ -19,17 +19,17 @@
 
 ### 2.1 成立的场景
 
-- **终端是唯一入口**：SSH 到远程机、容器里、tmux 里。Claude Code 桌面版到不了那台机器（本机已有的 `ssh -p 8027` 就是这种环境）。
+- **终端是唯一入口**：SSH 到远程机、容器里、tmux 里。桌面版有 Browser pane 和它的 DOM/点击工具，但**到不了那台机器**——官方文档明说 SSH 会话里模型没有这些工具（本机已有的 `ssh -p 8027` 就是这种环境）。
 - **断线不断活**：tmux/screen 会话常驻，换机器、换网络、从手机接回，还是那一屏。桌面上关掉就没了。
 - **无图形环境**：服务器、CI、无 X 容器，连浏览器窗口都不存在。
-- **模型需要能动的东西**：桌面版的预览面板是给人看的，模型点按钮仍靠盲猜截图；Transom 直接给结构化的 DOM / 协议对象和可调用动作。
+- **模型需要能动的东西，且要是注册工具**：桌面版靠它自己的内置工具，只在桌面进程里成立；Transom 给的是注册进本会话的 `snapshot`/`act` 工具和结构化对象图——不走 Bash、不带 shell 引号、结果有类型、有可见区预算，任何终端都成立。
 - **同屏审查**：改完立刻看、看错立刻说，转录和画面同会话，复盘不用切窗口。
 
 ### 2.2 不成立的场景（明确让位）
 
 | 需求 | 该用什么 |
 |---|---|
-| 看排版、视频、精细拖拽、多标签浏览 | 桌面版 / 真浏览器 |
+| 本地开发、要看排版、视频、精细拖拽、多标签浏览 | 桌面版 Browser pane / 真浏览器 |
 | 本地纯写代码、不碰界面 | CLI 本身就够 |
 | 需要像素级保真的验收 | 桌面版 |
 
@@ -43,10 +43,11 @@
 
 ## 4. 竞品与先例
 
-### 4.1 会话内面板（能看，模型看不见）
+### 4.1 会话内面板
 
 | 项目 | 说明 | 缺口 |
 |---|---|---|
+| **[zenbu-labs/terminal-browser](https://github.com/zenbu-labs/terminal-browser)**（MIT，4.5k★） | Chromium 离屏渲染到 kitty graphics，作为 function-hooks 面板；`/browser` 命令；可选 `open`/`close` 工具，动作走 `agent-browser` CLI（文本 a11y 快照 + `@e1` 引用） | 动作走 Bash CLI 而非注册工具；面板依赖 kitty graphics + unicode 占位，tmux 下失效且坐标报错；只有浏览器，无 provider 框架、无人与模型共用队列、无审计 |
 | [sandipchitale/browser-pane](https://github.com/sandipchitale/browser-pane)（MIT） | 共享浏览器窗口，各 mod 加标签页，本地 HTTP + 会话 token | README 明确不含 DOM 读取与点击驱动 |
 | [pinkpixel-dev/claude-workspace](https://github.com/pinkpixel-dev/claude-workspace) | 工作区面板：浏览编辑文件、撤销 Claude 改动 | 限文件域 |
 | [kesavreddy-commits/repoviewer](https://github.com/kesavreddy-commits/repoviewer) / [timmetim/cli-mod](https://github.com/timmetim/cli-mod) | 仓库浏览 / 文件浏览器 + diff | 限文件域 |
@@ -57,7 +58,7 @@
 
 [open-claude-in-chrome](https://github.com/noemica-io/open-claude-in-chrome)（274★）、[safari-mcp](https://github.com/achiya-automation/safari-mcp)（237★）、[cdpilot](https://github.com/mehmetnadir/cdpilot)、[browser-debugger-cli](https://github.com/szymdzum/browser-debugger-cli)（184★），以及 `chrome-devtools-mcp`、`playwright` MCP。
 
-**共性缺口**：窗口和会话分离，人看不到模型在点什么。
+**共性缺口**：窗口和会话分离，人看不到模型在点什么。桌面版内建的 Browser pane 已经解决了本地场景——模型能读 DOM、点击、填表——但它不在 CLI 里、到不了 SSH 远端，也没有 provider 抽象。
 
 ### 4.3 其他接入先例
 
@@ -66,7 +67,12 @@
 - [prismantis](https://github.com/NahumLitvin/prismantis)（316★）：表格、代码、图表的富渲染
 - [prompt-rail](https://github.com/oikon48/prompt-rail)（59★）：历史提示条
 
-**结论：前半截（模型能操作）和后半截（应用画在会话里）两边都成熟，组合没人做。**这就是 Transom 的位置。
+**结论：位置要收窄。** 2026-07 起 [terminal-browser](https://github.com/zenbu-labs/terminal-browser) 已经证明了"会话内浏览器 + 模型动作"，2026 年的桌面版也内建了 DOM 级 Browser pane。Transom 的空位不在"会话里有个浏览器"，而在：
+
+1. **provider 无关**：浏览器只是第一个适配器，合同按能力协商写；下一个可以是 Minecraft、LINE。
+2. **注册工具而非 shell CLI**：类型化输入输出、无 Bash 权限弹窗、可见区 token 预算。
+3. **人机同一条队列**：同一把焦点令牌、同一份审计、同一个 `act()`。
+4. **远端与 tmux 是一等公民**：不依赖 kitty graphics，文本档在任何终端可读。
 
 ## 5. 引擎能力调研（本机实测，Claude Code 2.1.319）
 
@@ -182,6 +188,8 @@ type Provider = {
 | 终端差异 | 能力协商 + 显式兼容矩阵，不承诺全终端 |
 | 性能塌陷 | 视觉档限 2–5 fps，纯文本优先 |
 | 攻击面扩大 | 白名单 + 确认 + 审计；接入即授权 |
+| 页面提示注入（快照文本骗模型点外链/填表） | 快照当不可信输入；导航永远校验协议/主机；写动作默认确认；审计可回看 |
+| 厂商竞争：terminal-browser 已占浏览器场景 | 不与其拼渲染；押 provider 框架、注册工具、远端与审计 |
 | 上下文污染 | 快照裁剪策略，默认只给可见区 |
 
 ## 12. 开放问题
