@@ -111,14 +111,14 @@ export function registerTools(on: On, deps: ToolDeps): void {
     } catch (error) {
       return fail(String((error as Error).message ?? error))
     }
-  })
+  }).catch(() => fail('transom: the tool failed internally'))
 
   on('tool.call', { tool: 'mcp__transom__browser_snapshot' }, async (_$, e) => {
     const scope = (e as unknown as { scope?: 'viewport' | 'document' }).scope
     if (hub().view.status === 'closed') return fail('No page is open. Call browser_open first.')
     const { text, auditId } = await hub().modelSnapshot(scope === 'document' ? 'document' : 'viewport')
     return answer(`${text}\n\naudit ${auditId}`)
-  })
+  }).catch(() => fail('transom: the tool failed internally'))
 
   on('tool.call', { tool: 'mcp__transom__browser_act' }, async (_$, e) => {
     const action = toAction(e as unknown as Record<string, unknown>)
@@ -127,7 +127,7 @@ export function registerTools(on: On, deps: ToolDeps): void {
     const { result, auditId, denied } = await hub().act(action, 'model')
     const header = result.ok ? 'ok' : denied ? 'denied' : 'failed'
     return answer(`${header}: ${result.message}\naudit ${auditId}`)
-  })
+  }).catch(() => fail('transom: the tool failed internally'))
 
   on('tool.call', { tool: 'mcp__transom__browser_screenshot' }, async (_$, e) => {
     const input = e as unknown as { cols?: number; rows?: number }
@@ -150,7 +150,7 @@ export function registerTools(on: On, deps: ToolDeps): void {
     } catch (error) {
       return fail(String((error as Error).message ?? error))
     }
-  })
+  }).catch(() => fail('transom: the tool failed internally'))
 
   on('tool.call', { tool: 'mcp__transom__browser_audit' }, async (_$, e) => {
     const input = e as unknown as { limit?: number }
@@ -162,7 +162,7 @@ export function registerTools(on: On, deps: ToolDeps): void {
         .map(entry => `${entry.ok ? 'ok' : '!!'} ${new Date(entry.at).toISOString().slice(11, 19)} ${entry.actor} ${entry.action} ${entry.durationMs}ms ${entry.message ?? ''}`)
         .join('\n'),
     )
-  })
+  }).catch(() => fail('transom: the tool failed internally'))
 }
 
 function toAction(input: Record<string, unknown>): Action | string {

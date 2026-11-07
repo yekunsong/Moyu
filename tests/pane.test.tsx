@@ -190,6 +190,7 @@ test('a model open of an unlisted host asks before starting', async ($, on) => {
   const opened = await tool($, 'browser_open', { url: 'https://elsewhere.test/' })
   expect(opened.text ?? '').toContain('denied')
   expect(bottom.asks.at(-1) ?? '').toContain('navigating')
+  expect(bottom.spawns).toBe(0)
 })
 
 test('the act tool refuses an unknown kind', async ($, on) => {

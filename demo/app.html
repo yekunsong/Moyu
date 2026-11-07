@@ -34,7 +34,7 @@
   <h2>Counter</h2>
   <div class="card row">
     <button id="dec" aria-label="Decrease count">−</button>
-    <output id="count" aria-live="polite">0</output>
+    <output id="count" role="status" aria-live="polite">0</output>
     <button id="inc" class="primary" aria-label="Increase count">+</button>
     <span id="status"></span>
   </div>
@@ -45,6 +45,8 @@
       <div class="row" style="margin-bottom:8px">
         <input name="email" type="email" placeholder="you@example.com" aria-label="Email" required />
         <input name="password" type="password" placeholder="Password" aria-label="Password" required />
+        <input name="pin" type="PASSWORD" aria-label="PIN" placeholder="PIN" />
+        <input name="bare" type="password" />
       </div>
       <div class="row">
         <select name="plan" aria-label="Plan">
@@ -67,6 +69,12 @@
       </div>
     </form>
     <ul class="todo" id="todos"></ul>
+  </div>
+
+  <h2>Overlay</h2>
+  <div class="card" style="position:relative;min-height:44px">
+    <button id="pay">Pay $500</button>
+    <div id="cover" aria-label="Overlay" style="position:absolute;inset:0;background:rgba(180,74,26,.12);z-index:1"></div>
   </div>
 
   <h2>Canvas</h2>

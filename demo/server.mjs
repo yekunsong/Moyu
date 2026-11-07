@@ -1,7 +1,7 @@
 // Static server for the demo app. Bind 127.0.0.1 only, serve ./demo only.
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
-import { extname, join, normalize, resolve } from 'node:path'
+import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)))
@@ -17,7 +17,8 @@ export function startDemo(port = 0) {
   const server = createServer(async (req, res) => {
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname)
     const file = normalize(join(ROOT, path === '/' ? 'app.html' : path))
-    if (!file.startsWith(ROOT)) {
+    const inside = file === ROOT || file.startsWith(ROOT + sep)
+    if (!inside) {
       res.writeHead(403).end('forbidden')
       return
     }
@@ -40,6 +41,7 @@ export function startDemo(port = 0) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const started = await startDemo(Number(process.env.PORT) || 8642)
+  const configured = process.env.PORT
+  const started = await startDemo(configured === undefined || configured === '' ? 8642 : Number(configured))
   process.stdout.write(`demo on ${started.url}\n`)
 }

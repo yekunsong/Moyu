@@ -8,6 +8,9 @@ export const INSTALL = String.raw`
   if (globalThis.__transom) return 'installed'
   const state = {
     next: 1,
+    // A document generation keeps refs from a previous navigation from
+    // rebinding to a different element on the new page.
+    gen: Math.random().toString(36).slice(2, 8),
     byRef: new Map(),
     refOf: new WeakMap(),
   }
@@ -16,7 +19,7 @@ export const INSTALL = String.raw`
   const refFor = el => {
     let ref = state.refOf.get(el)
     if (ref && state.byRef.get(ref) === el) return ref
-    ref = 't' + state.next++
+    ref = state.gen + ':' + state.next++
     state.refOf.set(el, ref)
     state.byRef.set(ref, el)
     if (state.byRef.size > 5000) {
@@ -109,6 +112,9 @@ export const SNAPSHOT = String.raw`
     (el.hasAttribute && (el.hasAttribute('onclick') || el.hasAttribute('tabindex'))) ||
     ['button','link','textbox','searchbox','checkbox','radio','combobox','listbox','slider','option','switch'].includes(explicitRole(el) || '')
 
+  const isPassword = el =>
+    el.tagName === 'INPUT' && String(el.getAttribute('type') || '').toLowerCase() === 'password'
+
   const nameOf = el => {
     const aria = el.getAttribute && el.getAttribute('aria-label')
     if (aria) return aria
@@ -127,7 +133,8 @@ export const SNAPSHOT = String.raw`
       if (placeholder) return placeholder
       const title = el.getAttribute('title')
       if (title) return title
-      if (el.tagName === 'INPUT') return el.value
+      // Never derive a password field's name from its value.
+      if (el.tagName === 'INPUT' && !isPassword(el)) return el.value
     }
     const alt = el.getAttribute && el.getAttribute('alt')
     if (alt) return alt
@@ -157,7 +164,7 @@ export const SNAPSHOT = String.raw`
 
   const valueOf = el => {
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
-      if (el.getAttribute('type') === 'password') return el.value ? '••••' : ''
+      if (isPassword(el)) return el.value ? '••••' : ''
       return el.value
     }
     return undefined
@@ -179,7 +186,7 @@ export const SNAPSHOT = String.raw`
 
   const push = (el, role, name, depth, kind) => {
     if (nodes.length >= maxNodes) return false
-    const text = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 160)
+    const text = String(name || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160)
     if (!text && role !== 'img' && role !== 'image') return true
     const rect = el.getBoundingClientRect()
     const node = {
@@ -235,9 +242,11 @@ export const SNAPSHOT = String.raw`
 
   walk(document.body || document.documentElement, 0)
 
+  const clean = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()
+
   return {
-    url: location.href,
-    title: document.title,
+    url: clean(location.href),
+    title: clean(document.title),
     capturedAt: Date.now(),
     viewport,
     landmarks,
@@ -273,6 +282,19 @@ export const ACT = String.raw`
     if (el) {
       el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
       const point = center(el)
+      const hit = document.elementFromPoint(point.x, point.y)
+      const reachable = hit && (hit === el || el.contains(hit) || hit.contains(el))
+      if (!reachable && action.kind !== 'scroll') {
+        return {
+          ok: false,
+          changed: false,
+          covered: true,
+          message:
+            'ref ' + action.ref + ' is covered by ' +
+            (hit ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') : 'nothing') +
+            ' at its center; scroll or close the overlay and retry',
+        }
+      }
       if (action.kind === 'click') {
         el.focus?.({ preventScroll: true })
         return { ok: true, changed: true, message: 'clicked ' + describe(el), at: point, element: el.tagName }
@@ -288,10 +310,19 @@ export const ACT = String.raw`
     if (!el) return { ok: false, stale: true, message: 'ref ' + action.ref + ' is stale' }
     el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
     el.focus({ preventScroll: true })
-    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
-    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
-    if (setter) setter.call(el, String(action.text ?? ''))
-    else el.value = String(action.text ?? '')
+    const text = String(action.text ?? '')
+    if (el.tagName === 'SELECT') {
+      el.value = text
+    } else if (el.isContentEditable) {
+      el.textContent = text
+    } else if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+      if (setter) setter.call(el, text)
+      else el.value = text
+    } else {
+      return { ok: false, changed: false, message: describe(el) + ' is not a text field' }
+    }
     el.dispatchEvent(new Event('input', { bubbles: true }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
     return { ok: true, changed: true, message: 'filled ' + describe(el) }

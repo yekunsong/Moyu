@@ -11,11 +11,12 @@ const PANE = 'transom'
 const view = atom({ plugin: 'transom', key: 'view' } as const, EMPTY_VIEW as ViewModel)
 // The last raster frame is a large blob; it lives for the drawing, not in
 // state. A reload drops it and the pane falls back to the text tier.
-let lastShot: { key: string; cells: string; columns: number; rows: number } = {
+let lastShot: { key: string; cells: string; columns: number; rows: number; url: string } = {
   key: '',
   cells: '',
   columns: 0,
   rows: 0,
+  url: '',
 }
 
 let hub: Hub | undefined
@@ -85,7 +86,7 @@ export const register: Register = (on, options) => {
       argumentHint: 'open <url> | demo | audit | close',
     })
     await update($, view, () => EMPTY_VIEW)
-    lastShot = { key: '', cells: '', columns: 0, rows: 0 }
+    lastShot = { key: '', cells: '', columns: 0, rows: 0, url: '' }
     return next(e)
   })
 
@@ -212,8 +213,8 @@ export const register: Register = (on, options) => {
     const model = await read($, view)
     const shot = lastShot
     const width = Math.max(20, e.props.bodyColumns)
-    const room = Math.max(3, (e.viewport?.rows ?? 28) - 9)
-    const rows = e.viewport?.rows ?? 28
+    const rows = e.props.scroll.bodyRows || e.viewport?.rows || 28
+    const room = Math.max(3, rows - 9)
     const degradation = negotiate(transom.provider.meta.capabilities, width, rows, false)
 
     const header = (
@@ -262,7 +263,7 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column" width="100%">
           {header}
           <Text color="red">error: {model.error ?? 'unknown'}</Text>
-          <Button key="retry" onPress={() => void transom.refresh(model.scope)}>Retry</Button>
+          <Button key="retry" onPress={() => void retry(ops, transom)}>Retry</Button>
           {toolbar}
           {model.audit.map((line, index) => (
             <Text key={`a${index}`} dimColor>{line}</Text>
@@ -291,7 +292,7 @@ export const register: Register = (on, options) => {
       )
     }
 
-    if (model.mode === 'visual' && shot.cells && shot.columns > 0 && shot.rows > 0) {
+    if (model.mode === 'visual' && shot.cells && shot.columns > 0 && shot.rows > 0 && shot.url === model.url) {
       const rasterRows = shot.rows
       const rasterCols = shot.columns
       return (
@@ -336,10 +337,12 @@ export const register: Register = (on, options) => {
   on('ui.close', { id: PANE }, async (_$, e, next) => {
     if (hub) await hub.close()
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
-    if (hub) await hub.close()
+    // The end-of-session budget is short; fire and let the bridge's own
+    // /stop and idle shutdown do the cleanup if this does not land.
+    if (hub) void hub.close()
     stopDemo()
     return next(e)
   })
@@ -362,11 +365,20 @@ async function showVisual(
   const height = Math.max(5, Math.min(rows - 9, 40))
   try {
     const shot = await transom.provider.raster(cols, height)
-    lastShot = { key: String(Date.now()), ...shot }
+    lastShot = { key: String(Date.now()), ...shot, url: transom.view.url }
     await update($, view, model => ({ ...model, mode: 'visual' as const, last: `visual ${shot.columns}x${shot.rows}` }))
     void $.ui.invalidate('ui.render')
   } catch (error) {
     ops.toast(`visual: ${String((error as Error).message ?? error)}`)
+  }
+}
+
+async function retry(ops: Ops, transom: Hub): Promise<void> {
+  try {
+    await transom.provider.start()
+    await transom.refresh()
+  } catch (error) {
+    ops.toast(`retry: ${String((error as Error).message ?? error)}`)
   }
 }
 

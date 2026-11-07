@@ -281,7 +281,7 @@ type Provider = {
 2. **视觉帧不进状态**：一帧 Raster 最大 512×256×12 字节，放 `$.state` 不合适；存在 `hooks/main.tsx` 的模块变量里，热重载后回文本档。
 3. **`$` 不跨模块传递**：`claude plugin validate` 禁止把 `$` 当参数传；hub/provider 接收 `engine/ops.ts` 的窄接口，`Ops` 在 hooks 模块里内联构造。
 4. **测试的 fake bridge**：`claude plugin test` 无网络/进程，`tests/helpers.ts` 以内存页冒充 bridge，覆盖权限、审计、渲染、降级与重启。
-5. **健康检查**：supervisor 每 5s `/health`，连续失败按 250ms×2^n 退避重启，4 次后进错误面板；bridge 空闲 10 分钟自停（健康轮询不算活动）。
+5. **健康检查**：supervisor 每 5s `/health`，连续失败按 250ms×2^n 退避重启，4 次后进错误面板；bridge 空闲 30 分钟自停（健康轮询不算活动）。
 6. **焦点令牌交给引擎**：不再自建全局令牌。点击面板由引擎夺焦、Esc 无条件交还（`closeOnEscape` 不开），`ui.render` 读 `isFocused` 决定键盘条是否转发。只有一套焦点，少了同步两套状态的风险。
 
 每完成一个里程碑：`tsc` + `validate` + 测试 + 本地提交。
@@ -297,7 +297,7 @@ type Provider = {
 | 页面反复重排导致 ref 失效 | ref 绑定后端节点，动作前校验；失效返回 `stale-ref` 并附新快照 |
 | 上下文污染 | §3.7 策略 + 硬上限 |
 | 端口/令牌泄漏 | 只绑 `127.0.0.1`，随机 32 字节 token，子进程 env 传入，不进命令行 |
-| Chrome 多实例占内存 | supervisor 单实例；`/transom close` 立即释放；空闲 10 分钟自动停 |
+| Chrome 多实例占内存 | supervisor 单实例；`/transom close` 立即释放；空闲 30 分钟自动停 |
 | Windows 进程树残留 | `taskkill /T /F` + 临时 profile 目录清理（会话结束尽力删） |
 
 ## 6. 威胁模型摘要

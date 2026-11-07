@@ -14,10 +14,10 @@
 | bridge HTTP | 本机其他进程调用 `/act` | 随机 token；只绑回环；token 仅存于子进程 env 与插件内存 |
 | 页面脚本 | 通过 DOM 文本诱导模型点外链、填表、提交 | 快照标注为非指令来源；导航前后校验协议/主机；写动作确认；审计可回看 |
 | 导航 | `javascript:` / `data:` / `file:` 读取本机文件 | 仅 http/https；`file:` 一律拒绝；主机白名单 |
-| 表单 | 密码泄露进快照 | `type=password` 的 value 固定为 `••••` |
-| 点击 | 点到不可见/覆盖层元素 | 快照只收可见节点；动作前 `scrollIntoView`；CDP 真实鼠标事件 |
-| 进程 | 残留 Chrome 进程树 | bridge 收 `/stop` → `Browser.close` → 杀子进程；supervisor 退避重启；空闲 10 分钟自停 |
-| 审计 | 无痕操作 | 人/模型动作同一队列，成功失败都入账；`$.store` 持久 2000 条 |
+| 表单 | 密码泄露进快照 | 密码字段（含大小写变体）的 value 固定为 `••••`，且不从 value 取无障碍名 |
+| 点击 | 点到不可见/覆盖层元素 | 快照只收可见节点；动作前 `scrollIntoView` + `elementFromPoint` 命中测试，被遮挡返回 `covered` 而不是假成功；CDP 真实鼠标事件 |
+| 进程 | 残留 Chrome 进程树 | bridge 收 `/stop` → `Browser.close` → 杀子进程；supervisor 退避重启；空闲 30 分钟自停 |
+| 审计 | 无痕操作、表单值泄露 | 人/模型动作同一队列，成功失败都入账；`fill` 只记 ref 与字符数，不记文本；`$.store` 持久 2000 条 |
 | 引擎接口 | early access 变更 | 所有 `$` 使用集中在 `hooks/main.tsx` 内的 `Ops` 字面量与 `engine/` 一层 |
 
 ## 3. 明确不防的东西

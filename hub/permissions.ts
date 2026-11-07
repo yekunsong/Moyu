@@ -121,7 +121,7 @@ export function describeAction(action: Action): string {
     case 'click':
       return `click ${action.ref}`
     case 'fill':
-      return `fill ${action.ref} with "${action.text.slice(0, 40)}"`
+      return `fill ${action.ref} (${action.text.length} chars)`
     case 'select':
       return `select ${action.value} in ${action.ref}`
     case 'press':

@@ -11,14 +11,19 @@ const START_TIMEOUT_MS = 8000
 const HEALTH_INTERVAL_MS = 5000
 const MAX_RESTARTS = 4
 
+type Stream = AsyncGenerator<{ stream: 'stdout' | 'stderr'; text: string }, unknown>
+
 export class Supervisor {
   #phase: Phase = 'idle'
   #endpoint: Endpoint | undefined
   #token = ''
   #restarts = 0
-  #lastStart = 0
   #healthTimer: { cancel: () => void } | undefined
+  #restartTimer: { cancel: () => void } | undefined
+  #stream: Stream | undefined
+  #idleExit = false
   #onFatal: (reason: string) => void = () => {}
+  #onIdle: () => void = () => {}
 
   constructor(private readonly ops: Ops) {}
 
@@ -34,13 +39,17 @@ export class Supervisor {
     this.#onFatal = fn
   }
 
+  onIdle(fn: () => void): void {
+    this.#onIdle = fn
+  }
+
   async ensure(): Promise<Endpoint> {
     if (this.#phase === 'ready' && this.#endpoint) return this.#endpoint
     if (this.#phase === 'starting') {
       for (let i = 0; i < 70; i++) {
         await this.#$sleep(100)
         if ((this.#phase as Phase) === 'ready' && this.#endpoint) return this.#endpoint
-        if ((this.#phase as Phase) === 'failed') break
+        if ((this.#phase as Phase) === 'failed' || (this.#phase as Phase) === 'stopped') break
       }
       throw new Error('bridge did not become ready')
     }
@@ -49,7 +58,7 @@ export class Supervisor {
 
   async #start(): Promise<Endpoint> {
     this.#phase = 'starting'
-    this.#lastStart = Date.now()
+    this.#idleExit = false
     this.#token = randomToken()
     const env: Record<string, string> = { TRANSOM_TOKEN: this.#token }
     const chrome = processEnvChrome()
@@ -57,7 +66,8 @@ export class Supervisor {
     const stream = this.ops.spawn({
       argv: [nodePath(), `${this.ops.root}/bridge/bridge.mjs`],
       env,
-    })
+    }) as Stream
+    this.#stream = stream
 
     let stdoutBuffer = ''
     let handshake: { ready?: boolean; port?: number; error?: string } | undefined
@@ -71,7 +81,8 @@ export class Supervisor {
       void (async () => {
         try {
           // Keep the loop alive for the child's whole life: leaving it kills
-          // the bridge. The handshake is only the first stdout line.
+          // the bridge. The handshake is only the first stdout line; later
+          // lines report an intentional idle shutdown.
           for await (const chunk of stream) {
             if (chunk.stream !== 'stdout') continue
             stdoutBuffer += chunk.text
@@ -80,12 +91,16 @@ export class Supervisor {
               const line = stdoutBuffer.slice(0, index).trim()
               stdoutBuffer = stdoutBuffer.slice(index + 1)
               index = stdoutBuffer.indexOf('\n')
-              if (!line || settled) continue
+              if (!line) continue
+              let parsed: { event?: string; ready?: boolean; port?: number; error?: string }
               try {
-                handshake = JSON.parse(line) as typeof handshake
+                parsed = JSON.parse(line)
               } catch {
                 continue
               }
+              if (parsed.event === 'idle') this.#idleExit = true
+              if (settled) continue
+              handshake = parsed
               settled = true
               timer.cancel()
               resolve()
@@ -109,10 +124,16 @@ export class Supervisor {
     try {
       await firstLine
     } catch (error) {
+      this.#killStream()
       this.#phase = 'failed'
       throw error
     }
+    if ((this.#phase as Phase) === 'stopped') {
+      this.#killStream()
+      throw new Error('bridge stopped while starting')
+    }
     if (!handshake?.ready || !handshake.port) {
+      this.#killStream()
       this.#phase = 'failed'
       throw new Error(handshake?.error ?? 'bridge failed to start')
     }
@@ -145,14 +166,26 @@ export class Supervisor {
       if (!health.ok) throw new Error(health.error ?? 'bridge unhealthy')
     } catch (error) {
       if (this.#phase !== 'ready') return
-      this.#endpoint = undefined
-      this.#phase = 'failed'
-      this.#healthTimer?.cancel()
       const reason = String((error as Error).message ?? error)
-      if (this.#restarts < MAX_RESTARTS && this.#shouldRestart()) {
+      this.#endpoint = undefined
+      this.#healthTimer?.cancel()
+      this.#healthTimer = undefined
+      if (this.#idleExit) {
+        // A deliberate idle shutdown is not a crash: no restart, no error pane.
+        this.#killStream()
+        this.#phase = 'stopped'
+        this.#onIdle()
+        return
+      }
+      this.#phase = 'failed'
+      this.#killStream()
+      if (this.#restarts < MAX_RESTARTS) {
         this.#restarts += 1
         const wait = Math.min(8000, 250 * 2 ** this.#restarts)
-        this.ops.after(wait, () => {
+        this.#restartTimer?.cancel()
+        this.#restartTimer = this.ops.after(wait, () => {
+          this.#restartTimer = undefined
+          if (this.#phase === 'stopped') return
           void this.ensure().then(
             () => {},
             () => this.#onFatal(reason),
@@ -164,11 +197,6 @@ export class Supervisor {
     }
   }
 
-  #shouldRestart(): boolean {
-    // The user may have closed the pane on purpose; a stop() sets stopped.
-    return this.#phase === 'failed'
-  }
-
   /** Runs one health probe now; exposed for tests and `/transom status`. */
   async probe(): Promise<void> {
     await this.#check()
@@ -178,13 +206,31 @@ export class Supervisor {
     this.#phase = 'stopped'
     this.#healthTimer?.cancel()
     this.#healthTimer = undefined
+    this.#restartTimer?.cancel()
+    this.#restartTimer = undefined
     const endpoint = this.#endpoint
     this.#endpoint = undefined
-    if (!endpoint) return
+    if (endpoint) {
+      try {
+        await fetchJson(this.ops, `${endpoint.url}/stop`, endpoint.token, { method: 'POST', body: {} })
+        // Give the bridge its 250ms to close Chrome and remove the profile.
+        this.ops.after(600, () => this.#killStream())
+        return
+      } catch {
+        /* fall through and kill now */
+      }
+    }
+    this.#killStream()
+  }
+
+  #killStream(): void {
+    const stream = this.#stream
+    this.#stream = undefined
+    if (!stream) return
     try {
-      await fetchJson(this.ops, `${endpoint.url}/stop`, endpoint.token, { method: 'POST', body: {} })
+      void stream.return(undefined)
     } catch {
-      /* bridge may already be gone */
+      /* already ended */
     }
   }
 

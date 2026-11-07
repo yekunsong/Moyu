@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { timingSafeEqual } from 'node:crypto'
 
 import { Cdp } from './cdp.mjs'
 import { findBrowser } from './paths.mjs'
@@ -64,7 +65,7 @@ async function launch() {
     stderr = (stderr + String(chunk)).slice(-8000)
   })
   const portFile = join(profileDir, 'DevToolsActivePort')
-  const deadline = Date.now() + 20000
+  const deadline = Date.now() + 7000
   let port
   while (Date.now() < deadline) {
     try {
@@ -348,7 +349,20 @@ async function raster(request) {
     captureBeyondViewport: false,
     fromSurface: true,
   })
-  return await evalInPage(`(${DECODE_PNG})(${JSON.stringify({ png: captured.data, columns: width, rows: height })})`)
+  try {
+    return await evalInPage(`(${DECODE_PNG})(${JSON.stringify({ png: captured.data, columns: width, rows: height })})`)
+  } finally {
+    await restoreMetrics()
+  }
+}
+
+async function restoreMetrics() {
+  await cmd('Emulation.setDeviceMetricsOverride', {
+    width: VIEW_COLS * CELL_W,
+    height: VIEW_ROWS * CELL_H,
+    deviceScaleFactor: 1,
+    mobile: false,
+  }).catch(() => {})
 }
 
 async function shot(request) {
@@ -360,12 +374,16 @@ async function shot(request) {
     deviceScaleFactor: 1,
     mobile: false,
   })
-  const captured = await cmd('Page.captureScreenshot', {
-    format: 'png',
-    captureBeyondViewport: false,
-    fromSurface: true,
-  })
-  return { pngBase64: captured.data, cols: width, rows: height }
+  try {
+    const captured = await cmd('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: false,
+      fromSurface: true,
+    })
+    return { pngBase64: captured.data, cols: width, rows: height }
+  } finally {
+    await restoreMetrics()
+  }
 }
 
 function send(res, status, body) {
@@ -407,9 +425,22 @@ const ROUTES = {
   },
 }
 
+function tokenOk(header) {
+  if (typeof header !== 'string' || !header.startsWith('Bearer ')) return false
+  const given = Buffer.from(header.slice(7))
+  const want = Buffer.from(TOKEN)
+  if (given.length !== want.length) return false
+  return timingSafeEqual(given, want)
+}
+
 const server = createServer(async (req, res) => {
-  const auth = req.headers.authorization
-  if (auth !== `Bearer ${TOKEN}`) {
+  // The plugin's fetch sends no Origin. A browser page trying to reach the
+  // loopback bridge always sends one; refuse it even with a leaked token.
+  if (req.headers.origin !== undefined) {
+    send(res, 403, { ok: false, error: 'origin not allowed' })
+    return
+  }
+  if (!tokenOk(req.headers.authorization)) {
     send(res, 401, { ok: false, error: 'unauthorized' })
     return
   }

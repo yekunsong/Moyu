@@ -84,7 +84,9 @@ test('click, fill, select and submit work through refs', async () => {
   const inc = snap.nodes.find(node => node.name === 'Increase count')
   await json('/act', { action: { kind: 'click', ref: inc.ref } })
   const afterClick = (await json('/snapshot', { maxChars: 50000 })).body
-  assert.equal(afterClick.nodes.find(node => node.role === 'status' || node.name === '1')?.name ?? '1', '1')
+  const status = afterClick.nodes.find(node => node.role === 'status')
+  assert.ok(status, 'the counter has a status role')
+  assert.equal(status.name, '1')
 
   const email = afterClick.nodes.find(node => node.role === 'textbox' && node.name === 'Email')
   await json('/act', { action: { kind: 'fill', ref: email.ref, text: 'a@b.c' } })
@@ -164,4 +166,39 @@ test('screenshot returns a PNG', async () => {
   assert.equal(status, 200)
   const bytes = Buffer.from(body.pngBase64, 'base64')
   assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
+})
+
+test('refs do not rebind to elements on a new page', async () => {
+  await json('/navigate', { url: demo.url })
+  const first = (await json('/snapshot', { maxChars: 80000 })).body
+  const inc = first.nodes.find(node => node.name === 'Increase count')
+  await json('/navigate', { url: `${demo.url}frame.html` })
+  const result = await json('/act', { action: { kind: 'click', ref: inc.ref } })
+  assert.equal(result.body.ok, false)
+  assert.equal(result.body.stale, true)
+})
+
+test('a covered target is reported, not clicked through', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { scope: 'document', maxChars: 200000 })).body
+  const pay = snap.nodes.find(node => node.name === 'Pay $500')
+  assert.ok(pay, 'pay button present')
+  const result = await json('/act', { action: { kind: 'click', ref: pay.ref } })
+  assert.equal(result.body.ok, false)
+  assert.equal(result.body.covered, true)
+  assert.match(result.body.message, /covered/)
+})
+
+test('password fields stay masked regardless of attribute case or labels', async () => {
+  await json('/navigate', { url: demo.url })
+  let snap = (await json('/snapshot', { scope: 'document', maxChars: 200000 })).body
+  const pin = snap.nodes.find(node => node.name === 'PIN')
+  assert.ok(pin)
+  await json('/act', { action: { kind: 'fill', ref: pin.ref, text: 'secret9' } })
+
+  snap = (await json('/snapshot', { scope: 'document', maxChars: 200000 })).body
+  const after = snap.nodes.find(node => node.name === 'PIN')
+  assert.equal(after.value, '••••')
+  assert.ok(!snap.nodes.some(node => node.name === 'secret9'), 'no password leaks as a name')
+  assert.ok(!snap.nodes.some(node => node.value === 'secret9'))
 })

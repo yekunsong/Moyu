@@ -5,7 +5,7 @@ import { Supervisor } from '../engine/supervisor'
 
 type Timer = { cancel: () => void; fire: () => void }
 
-function fakeOps(state: { spawns: number; fail: boolean }) {
+function fakeOps(state: { spawns: number; fail: boolean; killed?: boolean }) {
   const every: Timer[] = []
   const after: Timer[] = []
   const timer = (list: Timer[], fn: () => void): Timer => {
@@ -51,7 +51,7 @@ function fakeOps(state: { spawns: number; fail: boolean }) {
     openPane: async () => ({ isPlaced: true }) as never,
     closePane: async () => {},
   } as unknown as Ops
-  return { ops, every, after }
+  return { ops, every, after, fireAfter: () => { for (const held of [...after]) held.fire() } }
 }
 
 const settle = async () => {
@@ -96,5 +96,39 @@ test('stop asks the bridge to shut down', async () => {
   const supervisor = new Supervisor(ops)
   await supervisor.ensure()
   await supervisor.stop()
+  expect(supervisor.phase).toBe('stopped')
+})
+
+test('stop during start kills the child and leaves no live endpoint', async () => {
+  const state: { spawns: number; fail: boolean; killed?: boolean } = { spawns: 0, fail: false }
+  const { ops, after, fireAfter } = fakeOps(state)
+  const supervisor = new Supervisor(ops)
+  const starting = supervisor.ensure()
+  await settle()
+  await supervisor.stop()
+  expect(supervisor.endpoint, 'endpoint cleared').toBeUndefined()
+  fireAfter()
+  await settle()
+  await starting.catch(() => {})
+  expect(supervisor.phase).toBe('stopped')
+  expect(supervisor.endpoint).toBeUndefined()
+  // A later explicit start is a fresh child, not the abandoned launch.
+  await supervisor.ensure()
+  expect(state.spawns).toBe(2)
+})
+
+test('a pending backoff after stop does not spawn again', async () => {
+  const state = { spawns: 0, fail: false }
+  const { ops, fireAfter } = fakeOps(state)
+  const supervisor = new Supervisor(ops)
+  await supervisor.ensure()
+  state.fail = true
+  await supervisor.probe()
+  expect(supervisor.phase, 'phase after failed probe').toBe('failed')
+
+  await supervisor.stop()
+  fireAfter()
+  await settle()
+  expect(state.spawns).toBe(1)
   expect(supervisor.phase).toBe('stopped')
 })

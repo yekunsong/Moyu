@@ -12,22 +12,27 @@ const ROLE_GLYPH: Record<string, string> = {
 export async function pressRow(ops: Ops, hub: Hub, row: ViewRow): Promise<string | undefined> {
   if (row.role === 'textbox' || row.role === 'searchbox') {
     const answer = await ops
-      .ask(`Value for “${row.label}”? Type a new value under Other.`, [
-        row.value ? `Keep “${row.value.slice(0, 40)}”` : 'Keep empty',
+      .ask(`New value for "${row.label}"? Type it under Other, or pick one of these.`, [
+        'Keep current',
+        'Clear field',
       ])
       .catch(() => undefined)
-    if (answer === undefined) return undefined
-    if (answer.startsWith('Keep ') || answer === (row.value ?? '')) return undefined
-    const { result } = await hub.act({ kind: 'fill', ref: row.ref, text: answer }, 'person')
+    if (answer === undefined || answer === 'Keep current') return undefined
+    const text = answer === 'Clear field' ? '' : answer
+    const { result } = await hub.act({ kind: 'fill', ref: row.ref, text }, 'person')
     return result.message
   }
 
   if (row.role === 'combobox' || row.role === 'listbox') {
     const answer = await ops
-      .ask(`Choose an option for “${row.label}” (type the value under Other).`, ['Keep current'])
+      .ask(`Which value for "${row.label}"? Type it under Other, or pick one of these.`, [
+        'Keep current',
+        'Clear selection',
+      ])
       .catch(() => undefined)
     if (answer === undefined || answer === 'Keep current') return undefined
-    const { result } = await hub.act({ kind: 'select', ref: row.ref, value: answer }, 'person')
+    const value = answer === 'Clear selection' ? '' : answer
+    const { result } = await hub.act({ kind: 'select', ref: row.ref, value }, 'person')
     return result.message
   }
 
