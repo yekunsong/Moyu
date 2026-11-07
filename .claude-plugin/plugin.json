@@ -1,0 +1,29 @@
+{
+  "name": "transom",
+  "version": "0.1.0",
+  "description": "A side pane for any app: one structured snapshot/act channel shared by people and the model.",
+  "author": { "name": "Transom contributors" },
+  "license": "MIT",
+  "hooks": "./hooks/hooks.json",
+  "userConfig": {
+    "allowedHosts": {
+      "type": "string",
+      "title": "Allowed hosts",
+      "description": "Comma-separated hostnames the browser provider may visit. localhost and 127.0.0.1 are always allowed.",
+      "default": "localhost,127.0.0.1"
+    },
+    "writePolicy": {
+      "type": "string",
+      "title": "Write actions",
+      "description": "How model-issued writes are confirmed: confirm (each), once (first per session), auto.",
+      "default": "confirm",
+      "options": ["confirm", "once", "auto"]
+    },
+    "snapshotMaxChars": {
+      "type": "number",
+      "title": "Snapshot character cap",
+      "description": "Hard cap on a snapshot handed to the model.",
+      "default": 12000
+    }
+  }
+}
