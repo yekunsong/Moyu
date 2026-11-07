@@ -90,7 +90,7 @@ export class Hub {
     return next
   }
 
-  async open(url: string, width: number): Promise<{ ok: boolean; message: string }> {
+  async open(url: string, width: number, actor: 'person' | 'model' = 'person'): Promise<{ ok: boolean; message: string }> {
     return await this.enqueue(async () => {
       const auditId = await this.audit.begin('person', 'browser', { kind: 'navigate', url }, 'open', url)
       const started = Date.now()
@@ -99,9 +99,18 @@ export class Hub {
         await this.provider.start()
         let target = url
         if (target) {
-          const decision = decide(this.config, { kind: 'navigate', url: target }, 'person', this.grant)
+          const decision = decide(this.config, { kind: 'navigate', url: target }, actor, this.grant)
           if (decision.effect === 'deny') throw new Error(decision.reason)
-          const result = await this.provider.act({ kind: 'navigate', url: target }, { actor: 'person' })
+          if (decision.effect === 'confirm') {
+            const answer = await ask(
+              this.ops,
+              `Transom: allow navigating to “${target}”? (${decision.reason})`,
+              ['Allow', 'Allow all this session', 'Deny'],
+            )
+            if (answer === undefined || answer === 'Deny') throw new Error('navigation denied by person')
+            if (answer === 'Allow all this session') this.grant.auto = true
+          }
+          const result = await this.provider.act({ kind: 'navigate', url: target }, { actor })
           if (!result.ok) throw new Error(result.message)
           await this.#remember(target)
         }

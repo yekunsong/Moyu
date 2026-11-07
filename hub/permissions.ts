@@ -89,6 +89,7 @@ export function decide(
     if (!hostAllowed(config, url.hostname)) {
       return { effect: 'confirm', reason: `${url.hostname} is not on the allowed-hosts list` }
     }
+    return { effect: 'allow', reason: 'host is on the allowed-hosts list' }
   }
 
   if (actor === 'person') {

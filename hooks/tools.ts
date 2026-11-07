@@ -104,7 +104,7 @@ export function registerTools(on: On, deps: ToolDeps): void {
     if (!url) return fail('url is required')
     try {
       await deps.openPane()
-      const opened = await hub().open(url, 100)
+      const opened = await hub().open(url, 100, 'model')
       if (!opened.ok) return fail(opened.message)
       const { text } = await hub().modelSnapshot('viewport')
       return answer(`Opened. audit follows.\n\n${text}`)

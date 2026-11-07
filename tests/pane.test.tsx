@@ -181,6 +181,17 @@ test('audit records model actions', async ($, on) => {
   expect(audit.text ?? '').toContain('click')
 })
 
+test('a model open of an unlisted host asks before starting', async ($, on) => {
+  const bottom = installBottom(on)
+  bottom.answerAsk('Deny')
+  load(on)
+  await start($)
+
+  const opened = await tool($, 'browser_open', { url: 'https://elsewhere.test/' })
+  expect(opened.text ?? '').toContain('denied')
+  expect(bottom.asks.at(-1) ?? '').toContain('navigating')
+})
+
 test('the act tool refuses an unknown kind', async ($, on) => {
   installBottom(on)
   load(on)
