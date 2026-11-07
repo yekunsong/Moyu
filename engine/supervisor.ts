@@ -22,6 +22,7 @@ export class Supervisor {
   #restartTimer: { cancel: () => void } | undefined
   #stream: Stream | undefined
   #idleExit = false
+  #attachPort: number | undefined
   #onFatal: (reason: string) => void = () => {}
   #onIdle: () => void = () => {}
 
@@ -43,7 +44,8 @@ export class Supervisor {
     this.#onIdle = fn
   }
 
-  async ensure(): Promise<Endpoint> {
+  async ensure(options?: { attachPort?: number }): Promise<Endpoint> {
+    if (options?.attachPort !== undefined) this.#attachPort = options.attachPort
     if (this.#phase === 'ready' && this.#endpoint) return this.#endpoint
     if (this.#phase === 'starting') {
       for (let i = 0; i < 70; i++) {
@@ -56,11 +58,13 @@ export class Supervisor {
     return await this.#start()
   }
 
-  async #start(): Promise<Endpoint> {
+  async #start(attachPortOverride?: number): Promise<Endpoint> {
     this.#phase = 'starting'
     this.#idleExit = false
     this.#token = randomToken()
     const env: Record<string, string> = { TRANSOM_TOKEN: this.#token }
+    const attachPort = attachPortOverride ?? this.#attachPort
+    if (attachPort) env.TRANSOM_ATTACH_PORT = String(attachPort)
     const chrome = processEnvChrome()
     if (chrome) env.TRANSOM_CHROME = chrome
     const stream = this.ops.spawn({
@@ -204,6 +208,7 @@ export class Supervisor {
 
   async stop(): Promise<void> {
     this.#phase = 'stopped'
+    this.#attachPort = undefined
     this.#healthTimer?.cancel()
     this.#healthTimer = undefined
     this.#restartTimer?.cancel()
@@ -214,7 +219,13 @@ export class Supervisor {
       try {
         await fetchJson(this.ops, `${endpoint.url}/stop`, endpoint.token, { method: 'POST', body: {} })
         // Give the bridge its 250ms to close Chrome and remove the profile.
-        this.ops.after(600, () => this.#killStream())
+        // Only the stream that was running at stop time may be killed: a
+        // start in the meantime (attach) has its own child.
+        const abandoned = this.#stream
+        this.ops.after(600, () => {
+          if (this.#stream !== abandoned) return
+          this.#killStream()
+        })
         return
       } catch {
         /* fall through and kill now */

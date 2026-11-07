@@ -2,10 +2,13 @@ import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 
 import { startDemo } from '../../demo/server.mjs'
+import { findBrowser } from '../../bridge/paths.mjs'
 
 const TOKEN = randomBytes(16).toString('hex')
 let bridge
@@ -299,4 +302,181 @@ test('password fields stay masked regardless of attribute case or labels', async
   assert.equal(after.value, '••••')
   assert.ok(!snap.nodes.some(node => node.name === 'secret9'), 'no password leaks as a name')
   assert.ok(!snap.nodes.some(node => node.value === 'secret9'))
+})
+
+// --- Attach mode -----------------------------------------------------------
+// A second Chrome, started by the test exactly as a person would start one,
+// plus a second bridge that must connect without owning it.
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address()
+      probe.close(() => resolve(port))
+    })
+  })
+}
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+async function waitForVersion(port, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs
+  let last = 'not tried'
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/version`)
+      if (response.ok) return await response.json()
+      last = `status ${response.status}`
+    } catch (error) {
+      last = String(error?.message ?? error)
+    }
+    await sleep(150)
+  }
+  throw new Error(`Chrome did not expose port ${port}: ${last}`)
+}
+
+async function startAttachedBridge(extraEnv) {
+  const token = randomBytes(16).toString('hex')
+  const child = spawn(process.execPath, ['bridge/bridge.mjs'], {
+    env: { ...process.env, TRANSOM_TOKEN: token, ...extraEnv },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stderr = ''
+  child.stderr.on('data', chunk => {
+    stderr += String(chunk)
+  })
+  const first = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`attached bridge did not start: ${stderr}`)), 25000)
+    child.stdout.on('data', chunk => {
+      const line = String(chunk).split('\n')[0].trim()
+      if (!line) return
+      clearTimeout(timer)
+      resolve(line)
+    })
+    child.on('exit', code => reject(new Error(`attached bridge exited ${code}: ${stderr}`)))
+  })
+  const handshake = JSON.parse(first)
+  if (!handshake.ready) throw new Error(handshake.error ?? stderr)
+  const base = `http://127.0.0.1:${handshake.port}`
+  const request = async (path, body) => {
+    const response = await fetch(`${base}${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    return { status: response.status, body: await response.json() }
+  }
+  return { child, base, request }
+}
+
+// Chrome on Windows is a process tree; taskkill /T is the reliable way to
+// leave nothing behind. On POSIX the child is spawned detached, so its pid is
+// the process group.
+async function killTree(child) {
+  if (!child || child.pid === undefined || child.exitCode !== null) return
+  if (process.platform === 'win32') {
+    await new Promise(resolve => {
+      const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+      killer.once('error', resolve)
+      killer.once('exit', resolve)
+    })
+    return
+  }
+  try {
+    process.kill(-child.pid, 'SIGKILL')
+  } catch {
+    try {
+      child.kill('SIGKILL')
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+async function waitExit(child, timeoutMs = 5000) {
+  if (!child || child.exitCode !== null) return
+  await new Promise(resolve => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      resolve()
+    }
+    child.once('exit', finish)
+    setTimeout(finish, timeoutMs)
+  })
+}
+
+test('attach mode mirrors a running Chrome and /stop leaves it alive', async () => {
+  const port = await freePort()
+  const profile = mkdtempSync(join(tmpdir(), 'transom-attach-test-'))
+  const chrome = spawn(
+    findBrowser(),
+    [
+      '--headless=new',
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profile}`,
+      '--no-first-run',
+      'about:blank',
+    ],
+    { stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' },
+  )
+  let attached
+  try {
+    const version = await waitForVersion(port)
+    assert.match(version.Browser ?? '', /Chrome|Edge/i)
+
+    attached = await startAttachedBridge({ TRANSOM_ATTACH_PORT: String(port) })
+    const health = await attached.request('/health')
+    assert.equal(health.body.ok, true)
+    assert.equal(health.body.mode, 'attached', 'health reports attach mode')
+    assert.equal(health.body.chrome, false, 'the bridge did not spawn Chrome')
+
+    const navigated = await attached.request('/navigate', { url: demo.url })
+    assert.equal(navigated.status, 200)
+
+    const before = (await attached.request('/snapshot', { scope: 'viewport', maxChars: 50000 })).body
+    assert.match(before.title, /Transom demo/)
+    const inc = before.nodes.find(node => node.name === 'Increase count')
+    assert.ok(inc, 'increase button present in the attached page')
+
+    const clicked = await attached.request('/act', { action: { kind: 'click', ref: inc.ref } })
+    assert.equal(clicked.body.ok, true)
+    const afterClick = (await attached.request('/snapshot', { maxChars: 50000 })).body
+    assert.equal(afterClick.nodes.find(node => node.role === 'status').name, '1')
+
+    // A frame must not resize the person's window, and it maps clicks to the
+    // real innerWidth/innerHeight rather than the requested cell box.
+    const frame = await attached.request('/frame', { cols: 40, rows: 12 })
+    assert.equal(frame.status, 200)
+    assert.equal(existsSync(frame.body.file), true)
+    assert.deepEqual([...readFileSync(frame.body.file).subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
+    const afterFrame = (await attached.request('/snapshot', { maxChars: 50000 })).body
+    assert.equal(afterFrame.viewport.width, before.viewport.width, 'viewport width unchanged')
+    assert.equal(afterFrame.viewport.height, before.viewport.height, 'viewport height unchanged')
+    assert.equal(frame.body.pageWidth, before.viewport.width)
+    assert.equal(frame.body.pageHeight, before.viewport.height)
+
+    // /stop only detaches: Chrome must still answer on its debugging port.
+    const stopped = await attached.request('/stop', {})
+    assert.equal(stopped.body.ok, true)
+    await waitExit(attached.child)
+    await sleep(500)
+    const still = await fetch(`http://127.0.0.1:${port}/json/version`)
+    assert.equal(still.ok, true, 'the attached browser is still running')
+    assert.ok((await still.json()).webSocketDebuggerUrl, 'its DevTools endpoint still answers')
+  } finally {
+    if (attached) {
+      attached.child.kill()
+      await waitExit(attached.child)
+    }
+    await killTree(chrome)
+    await waitExit(chrome)
+    rmSync(profile, { recursive: true, force: true, maxRetries: 3 })
+  }
 })

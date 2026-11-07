@@ -5,7 +5,7 @@ import { Supervisor } from '../engine/supervisor'
 
 type Timer = { cancel: () => void; fire: () => void }
 
-function fakeOps(state: { spawns: number; fail: boolean; killed?: boolean }) {
+function fakeOps(state: { spawns: number; fail: boolean; killed?: boolean; spawnEnvs?: Array<Record<string, string>> }) {
   const every: Timer[] = []
   const after: Timer[] = []
   const timer = (list: Timer[], fn: () => void): Timer => {
@@ -43,7 +43,10 @@ function fakeOps(state: { spawns: number; fail: boolean; killed?: boolean }) {
       }
       return { status: 200, ok: true, headers: {}, text: '{"ok":true}' }
     },
-    spawn: () => stream() as never,
+    spawn: (request: { env?: Record<string, string> }) => {
+      state.spawnEnvs?.push(request.env ?? {})
+      return stream() as never
+    },
     storeGet: async () => undefined,
     storeSet: async () => {},
     every: (ms: number, fn: () => void) => timer(every, fn) as never,
@@ -88,6 +91,21 @@ test('a failing health check restarts the bridge', async () => {
   expect(state.spawns).toBe(2)
   expect(supervisor.phase).toBe('ready')
   expect(fatal).toEqual([])
+})
+
+test('ensure({ attachPort }) passes the debugging port to the bridge', async () => {
+  const state = { spawns: 0, fail: false, spawnEnvs: [] as Array<Record<string, string>> }
+  const { ops } = fakeOps(state)
+  const supervisor = new Supervisor(ops)
+  await supervisor.ensure({ attachPort: 9222 })
+  expect(supervisor.phase).toBe('ready')
+  expect(state.spawnEnvs.length).toBe(1)
+  expect(state.spawnEnvs[0]?.TRANSOM_ATTACH_PORT).toBe('9222')
+  // A plain close clears the mode: the next start launches fresh.
+  await supervisor.stop()
+  await supervisor.ensure()
+  expect(state.spawnEnvs.length).toBe(2)
+  expect(state.spawnEnvs[1]?.TRANSOM_ATTACH_PORT).toBeUndefined()
 })
 
 test('stop asks the bridge to shut down', async () => {

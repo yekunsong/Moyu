@@ -6,6 +6,7 @@
 - **All page content is untrusted.** Text, links and form names in a snapshot can be attacker-controlled. Transom never treats page text as instructions; every snapshot carries a provenance banner, and every action passes through the permission layer.
 - **People are trusted more than models.** Human clicks in the pane execute without per-action confirmation because the person can see the page; model-initiated writes are confirmed according to `writePolicy`. Both are bound by the scheme/host allowlists.
 - **Chrome uses a throwaway profile.** A private `--user-data-dir` under `mkdtemp`; no access to the user's daily cookies, password store or extensions. Removed on stop (best effort).
+- **Attach mode inherits the person's browser session.** `/transom attach <port>` connects to a Chrome the person started with `--remote-debugging-port`; its page, cookies and logged-in state belong to that browser, so the throwaway-profile guarantee above does not apply. Attach is person-initiated only (no model tool reaches it), audited as `person attach <port>`, and `/transom close` or `/stop` detaches without closing the browser or touching its profile.
 
 ## 2. Attack surface and mitigations
 
@@ -37,4 +38,5 @@
 - [ ] Password values are masked.
 - [ ] Audit covers `snapshot`, `act`, `screenshot`, denials and failures.
 - [ ] Temporary profiles are removed after `stop`.
+- [ ] Attach mode never launches or closes Chrome: `/stop` detaches and the browser keeps running.
 - [ ] Documentation states that page text is untrusted.

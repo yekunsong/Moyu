@@ -39,6 +39,11 @@ let currentTitle = ''
 let navigations = 0
 let lastActivity = Date.now()
 let browserProduct = 'unknown'
+// `owned` means this process launched the browser and may close it. In attach
+// mode the browser belongs to the person: `/stop` only detaches.
+let owned = true
+let mode = 'launched'
+const ATTACH_PORT = Number(process.env.TRANSOM_ATTACH_PORT) || 0
 // HQ frames are files the terminal reads itself: no byte payload crosses the
 // plugin, and the terminal decodes the PNG at native density. At most ten are
 // kept so a once-a-second refresh cannot fill the temp dir.
@@ -50,9 +55,12 @@ const FRAME_LIMIT = 10
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function launch() {
+  frameDir = mkdtempSync(join(tmpdir(), 'transom-frame-'))
+  if (ATTACH_PORT) return await launchAttached(ATTACH_PORT)
+  owned = true
+  mode = 'launched'
   const exe = findBrowser()
   profileDir = mkdtempSync(join(tmpdir(), 'transom-profile-'))
-  frameDir = mkdtempSync(join(tmpdir(), 'transom-frame-'))
   const args = [
     '--headless=new',
     '--remote-debugging-port=0',
@@ -124,6 +132,64 @@ async function launch() {
     }
   })
   await evalInPage(INSTALL)
+}
+
+// Connect to a Chrome the person already started with --remote-debugging-port.
+// We never create a profile, spawn a process or resize the window: the page
+// stays live in the person's browser, and `/stop` only detaches our session.
+async function launchAttached(port) {
+  const version = await fetchJsonFromChrome(port, '/json/version')
+  const wsUrl = version.webSocketDebuggerUrl
+  if (!wsUrl) throw new Error(`port ${port} did not expose a DevTools WebSocket`)
+  cdp = await Cdp.connect(wsUrl)
+  // From here on the browser is the person's: a later failure must detach,
+  // never call Browser.close.
+  owned = false
+  mode = 'attached'
+  browserProduct = version.Browser ?? 'unknown'
+  cdp.onClose(() => {
+    if (!stopping) lastError = 'browser connection lost'
+  })
+
+  const targets = await fetchJsonFromChrome(port, '/json/list')
+  const pageTargets = targets.filter(target => target.type === 'page')
+  const plainPages = pageTargets.filter(target => !isDevtoolsTarget(target))
+  // Prefer a real http(s) tab, then any non-DevTools tab, then any page tab.
+  const page =
+    plainPages.find(target => /^https?:/i.test(target.url ?? '')) ??
+    plainPages[0] ??
+    pageTargets[0]
+  if (page?.id) {
+    targetId = page.id
+  } else {
+    const created = await cdp.send('Target.createTarget', { url: 'about:blank' })
+    targetId = created.targetId
+  }
+  const attached = await cdp.send('Target.attachToTarget', { targetId, flatten: true })
+  sessionId = attached.sessionId
+  await cmd('Page.enable')
+  await cmd('Runtime.enable')
+  await cmd('Log.enable')
+  await cmd('Page.setLifecycleEventsEnabled', { enabled: true })
+  cdp.on('Page.frameNavigated', (params) => {
+    if (params.frame?.id !== undefined && params.frame.parentId === undefined) {
+      currentUrl = params.frame.url
+      navigations += 1
+    }
+  })
+  await evalInPage(INSTALL)
+  currentUrl = page?.url ?? 'about:blank'
+  currentTitle = page?.title ?? ''
+}
+
+function isDevtoolsTarget(target) {
+  return /^(devtools|chrome|edge|about):/i.test(target.url ?? '')
+}
+
+async function fetchJsonFromChrome(port, path) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`)
+  if (!response.ok) throw new Error(`${path} answered ${response.status}`)
+  return await response.json()
 }
 
 function cmd(method, params = {}, timeoutMs) {
@@ -319,7 +385,7 @@ async function act(action) {
 }
 
 async function health() {
-  const alive = !!cdp && !cdp.isClosed && chrome?.exitCode === null
+  const alive = !!cdp && !cdp.isClosed && (!owned || chrome?.exitCode === null)
   let title = currentTitle
   if (alive) {
     try {
@@ -331,6 +397,7 @@ async function health() {
   return {
     ok: alive,
     chrome: !!chrome,
+    mode,
     version: browserProduct,
     url: currentUrl,
     title,
@@ -378,21 +445,37 @@ const DECODE_PNG = String.raw`
 async function raster(request) {
   const width = Math.max(20, Math.min(Number(request.cols) || VIEW_COLS, 512))
   const height = Math.max(5, Math.min(Number(request.rows) || VIEW_ROWS, 256))
-  await cmd('Emulation.setDeviceMetricsOverride', {
-    width: width * CELL_W,
-    height: height * CELL_H,
-    deviceScaleFactor: 1,
-    mobile: false,
-  })
-  const captured = await cmd('Page.captureScreenshot', {
+  // An attached browser belongs to the person: never resize its window. The
+  // capture keeps the current viewport and is packed into the requested cells.
+  if (owned) {
+    await cmd('Emulation.setDeviceMetricsOverride', {
+      width: width * CELL_W,
+      height: height * CELL_H,
+      deviceScaleFactor: 1,
+      mobile: false,
+    })
+  }
+  try {
+    const captured = await capturePng()
+    return await evalInPage(`(${DECODE_PNG})(${JSON.stringify({ png: captured.data, columns: width, rows: height })})`)
+  } finally {
+    if (owned) await restoreMetrics()
+  }
+}
+
+async function capturePng() {
+  return await cmd('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: false,
     fromSurface: true,
   })
+}
+
+async function pageSize() {
   try {
-    return await evalInPage(`(${DECODE_PNG})(${JSON.stringify({ png: captured.data, columns: width, rows: height })})`)
-  } finally {
-    await restoreMetrics()
+    return await evalInPage('({ width: innerWidth, height: innerHeight })', false)
+  } catch {
+    return { width: VIEW_COLS * CELL_W, height: VIEW_ROWS * CELL_H }
   }
 }
 
@@ -408,21 +491,24 @@ async function restoreMetrics() {
 async function shot(request) {
   const width = Math.max(40, Math.min(Number(request.cols) || VIEW_COLS, 512))
   const height = Math.max(10, Math.min(Number(request.rows) || VIEW_ROWS, 256))
-  await cmd('Emulation.setDeviceMetricsOverride', {
-    width: width * CELL_W,
-    height: height * CELL_H,
-    deviceScaleFactor: 1,
-    mobile: false,
-  })
-  try {
-    const captured = await cmd('Page.captureScreenshot', {
-      format: 'png',
-      captureBeyondViewport: false,
-      fromSurface: true,
+  if (owned) {
+    await cmd('Emulation.setDeviceMetricsOverride', {
+      width: width * CELL_W,
+      height: height * CELL_H,
+      deviceScaleFactor: 1,
+      mobile: false,
     })
-    return { pngBase64: captured.data, cols: width, rows: height }
+  }
+  try {
+    const captured = await capturePng()
+    const result = { pngBase64: captured.data, cols: width, rows: height }
+    if (!owned) {
+      const size = await pageSize()
+      return { ...result, pageWidth: size.width, pageHeight: size.height }
+    }
+    return result
   } finally {
-    await restoreMetrics()
+    if (owned) await restoreMetrics()
   }
 }
 
@@ -432,20 +518,25 @@ async function shot(request) {
 async function frame(request) {
   const columns = Math.max(20, Math.min(Number(request.cols) || VIEW_COLS, 200))
   const rows = Math.max(5, Math.min(Number(request.rows) || VIEW_ROWS, 120))
-  const pageWidth = Math.min(columns * CELL_W, 2000)
-  const pageHeight = Math.min(rows * CELL_H, 1200)
-  await cmd('Emulation.setDeviceMetricsOverride', {
-    width: pageWidth,
-    height: pageHeight,
-    deviceScaleFactor: 1,
-    mobile: false,
-  })
-  try {
-    const captured = await cmd('Page.captureScreenshot', {
-      format: 'png',
-      captureBeyondViewport: false,
-      fromSurface: true,
+  let pageWidth = Math.min(columns * CELL_W, 2000)
+  let pageHeight = Math.min(rows * CELL_H, 1200)
+  if (owned) {
+    await cmd('Emulation.setDeviceMetricsOverride', {
+      width: pageWidth,
+      height: pageHeight,
+      deviceScaleFactor: 1,
+      mobile: false,
     })
+  }
+  try {
+    const captured = await capturePng()
+    if (!owned) {
+      // Attached: the capture is the person's real viewport, so the pane's
+      // click mapping must use that size rather than the requested cell box.
+      const size = await pageSize()
+      pageWidth = size.width
+      pageHeight = size.height
+    }
     frameGeneration += 1
     const file = join(frameDir, `f${frameGeneration}.png`)
     writeFileSync(file, Buffer.from(captured.data, 'base64'))
@@ -460,7 +551,7 @@ async function frame(request) {
     }
     return { file, generation: frameGeneration, columns, rows, pageWidth, pageHeight }
   } finally {
-    await restoreMetrics()
+    if (owned) await restoreMetrics()
   }
 }
 
@@ -554,18 +645,31 @@ async function shutdown(code) {
     }
     frameDir = undefined
   }
-  try {
-    if (cdp && !cdp.isClosed) await cdp.send('Browser.close', {}, undefined, 3000).catch(() => {})
-  } catch {
-    /* ignore */
-  }
-  cdp?.close()
-  if (chrome && chrome.exitCode === null) {
+  if (owned) {
     try {
-      chrome.kill()
+      if (cdp && !cdp.isClosed) await cdp.send('Browser.close', {}, undefined, 3000).catch(() => {})
     } catch {
       /* ignore */
     }
+    cdp?.close()
+    if (chrome && chrome.exitCode === null) {
+      try {
+        chrome.kill()
+      } catch {
+        /* ignore */
+      }
+    }
+  } else {
+    // Attached: leave the person's browser exactly as it was. Detach our
+    // flattened session (best effort) and drop the socket.
+    try {
+      if (cdp && !cdp.isClosed && sessionId) {
+        await cdp.send('Target.detachFromTarget', { sessionId }, undefined, 1500).catch(() => {})
+      }
+    } catch {
+      /* ignore */
+    }
+    cdp?.close()
   }
   setTimeout(() => {
     if (profileDir) rmSync(profileDir, { recursive: true, force: true, maxRetries: 2 })

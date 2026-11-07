@@ -54,6 +54,8 @@ export class Hub {
   readonly audit: Audit
   readonly config: Config
   readonly grant: SessionGrant = newGrant()
+  /** The debugging port while attached to a browser the person started. */
+  attachPort?: number
   #queue: Promise<unknown> = Promise.resolve()
   #lastSnapshot: Snapshot | undefined
   #refresh: (() => void) | undefined
@@ -153,9 +155,67 @@ export class Hub {
     })
   }
 
+  /**
+   * Attach to a Chrome the person started with --remote-debugging-port. The
+   * bridge only connects: closing later detaches and leaves the browser running.
+   */
+  async attach(port: number): Promise<{ ok: boolean; message: string }> {
+    return await this.enqueue(async () => {
+      const started = Date.now()
+      // Drop any browser this hub owns before switching to the person's one.
+      await this.provider.stop()
+      this.attachPort = port
+      this.#setView({
+        status: 'starting',
+        error: undefined,
+        url: '',
+        title: '',
+        rows: [],
+        last: `attaching to Chrome on port ${port}`,
+      })
+      try {
+        await this.provider.start({ attachPort: port })
+        const snapshot = await this.refresh()
+        if (!snapshot) throw new Error(this.#view.error ?? 'the attached browser did not answer')
+        const message = `attached to ${snapshot.title || snapshot.url || `port ${port}`}`
+        await this.audit.log({
+          actor: 'person',
+          provider: 'browser',
+          action: `attach ${port}`,
+          url: snapshot.url,
+          policy: 'person',
+          ok: true,
+          durationMs: Date.now() - started,
+          message,
+        })
+        this.#setView({
+          status: 'ready',
+          last: `attached to Chrome on port ${port}`,
+          audit: this.audit.recent(6).map(shortAudit),
+        })
+        return { ok: true, message }
+      } catch (error) {
+        const message = String((error as Error).message ?? error)
+        if (this.provider.supervisor.phase !== 'ready') this.attachPort = undefined
+        await this.audit.log({
+          actor: 'person',
+          provider: 'browser',
+          action: `attach ${port}`,
+          policy: 'person',
+          ok: false,
+          durationMs: Date.now() - started,
+          message,
+        })
+        this.#setView({ status: 'error', error: message })
+        return { ok: false, message }
+      }
+    })
+  }
+
   async close(): Promise<void> {
     await this.enqueue(async () => {
       await this.provider.stop()
+      this.attachPort = undefined
       this.#view = { ...EMPTY_VIEW }
       this.#refresh?.()
     })

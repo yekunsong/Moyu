@@ -39,8 +39,8 @@ export class BrowserProvider implements Provider {
     this.supervisor = new Supervisor(ops)
   }
 
-  async start(): Promise<void> {
-    await this.supervisor.ensure()
+  async start(options?: { attachPort?: number }): Promise<void> {
+    await this.supervisor.ensure(options)
   }
 
   async stop(): Promise<void> {

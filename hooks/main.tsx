@@ -151,8 +151,8 @@ export const register: Register = (on, options) => {
     await registerToolSpecs($)
     await $.command.register({
       name: 'transom',
-      description: 'Transom pane: open a URL, run the demo, inspect the audit, switch to hq, close',
-      argumentHint: 'open <url> | demo | audit | hq | close',
+      description: 'Transom pane: open a URL, run the demo, attach to Chrome, inspect the audit, switch to hq, close',
+      argumentHint: 'open <url> | demo | attach <port> | audit | hq | close',
     })
     await update($, view, () => EMPTY_VIEW)
     lastShot = { key: '', cells: '', columns: 0, rows: 0, url: '' }
@@ -197,6 +197,16 @@ export const register: Register = (on, options) => {
       await showPane(ops)
       const opened = await transom.open(demo.url, transom.provider.meta.defaultWidth)
       return { text: opened.ok ? `demo open at ${demo.url}` : opened.message }
+    }
+
+    if (verb === 'attach') {
+      const port = Number(target)
+      if (!/^\d+$/.test(target) || !Number.isInteger(port) || port < 1 || port > 65535) {
+        return { text: 'usage: /transom attach <port> (an integer from 1 to 65535)' }
+      }
+      await showPane(ops)
+      const attached = await transom.attach(port)
+      return { text: attached.ok ? `attached to Chrome on port ${port}` : attached.message }
     }
 
     if (verb === 'close') {
@@ -253,7 +263,7 @@ export const register: Register = (on, options) => {
       return { text: opened.ok ? `opened ${transom.view.url}` : opened.message }
     }
 
-    return { text: 'usage: /transom open <url> | demo | audit | hq | close' }
+    return { text: 'usage: /transom open <url> | demo | attach <port> | audit | hq | close' }
   })
 
   on('ui.message', { requestId: PANE }, async ($, e) => {

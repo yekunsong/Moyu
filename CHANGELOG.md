@@ -13,9 +13,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - Permission model: http(s)-only navigation, host allowlist with `localhost` always allowed, `confirm`/`once`/`auto` write policy, fail-closed confirmations.
 - Colored-cell visual tier (`Raster`, half-block, 24-bit color) and an HQ image tier (`Image`, real PNG frames at ~1 fps on kitty, Ghostty and WezTerm), with capability negotiation and a summary fallback.
 - Supervised local bridge: token-guarded loopback HTTP, health checks, exponential backoff, idle shutdown, process-tree cleanup.
+- Attach mode: `/transom attach <port>` mirrors and drives a Chrome the person started with `--remote-debugging-port`; closing detaches and leaves the browser running.
 - Snapshot hardening: document-generation refs, password masking, `elementFromPoint` hit tests, untrusted-content banner, control-character stripping.
 - Demo fixture (counter, form, list, canvas, shadow DOM, same-origin iframe, overlay, long scroller).
-- Test suites: 19 real-Chrome bridge integration tests, 30 plugin/supervisor tests, `claude plugin validate` and `tsc` gates.
+- Test suites: 20 real-Chrome bridge integration tests, 31 plugin/supervisor tests, `claude plugin validate` and `tsc` gates.
 - Documentation: README (English + Simplified Chinese), security model, provider guide, verified competitive landscape, implementation plan.
 
 ### Known limitations

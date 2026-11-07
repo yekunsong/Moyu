@@ -123,8 +123,20 @@ The model's write is confirmed before it runs. `/transom audit` shows both actio
 | `/transom` | Open the pane |
 | `/transom open <url>` | Open the pane and navigate (localhost/127.0.0.1 and configured hosts by default) |
 | `/transom demo` | Start the local fixture (counter, form, list, canvas, shadow DOM, iframe, long scroller) and open it |
+| `/transom attach <port>` | Attach to a Chrome already running with `--remote-debugging-port=<port>`; `/transom close` detaches without closing it |
 | `/transom audit` | Show the last 20 audit entries |
-| `/transom close` | Close the pane and stop the browser |
+| `/transom close` | Close the pane and stop the browser (in attach mode: detach only) |
+
+### Attach to a browser you started
+
+Transom can mirror and control an existing Chrome instead of launching its own. Start Chrome with a debugging port — the flag only applies to a new process, so quit Chrome first — then attach:
+
+```text
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir=%TEMP%\transom-chrome
+/transom attach 9222
+```
+
+The pane connects to the first tab (preferring an http/https page) and drives it in place; `/transom close` detaches and leaves Chrome running. Pass your normal profile directory instead of the temporary one if you want the browser's existing cookies and logins — attach mode inherits that state. See [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Model tools
 
@@ -214,7 +226,7 @@ Reusable refs must come from the application's own object identity, not coordina
 
 ## Security
 
-See [`docs/SECURITY.md`](docs/SECURITY.md). In short: the bridge is a loopback HTTP service guarded by a per-start random bearer token and rejects browser `Origin`; Chrome runs with a throwaway profile; navigation is http(s)-only and host-allowlisted; password values are masked; page text is untrusted data, never instructions; every action is audited.
+See [`docs/SECURITY.md`](docs/SECURITY.md). In short: the bridge is a loopback HTTP service guarded by a per-start random bearer token and rejects browser `Origin`; Chrome runs with a throwaway profile (attach mode instead uses the browser you started); navigation is http(s)-only and host-allowlisted; password values are masked; page text is untrusted data, never instructions; every action is audited.
 
 Known non-goal: a model click on a link can navigate to a host outside the allowlist as a side effect. Under `confirm`/`once` the click itself is confirmed; `auto` gives that protection up.
 

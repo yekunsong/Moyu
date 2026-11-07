@@ -123,8 +123,20 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 | `/transom` | 打开面板 |
 | `/transom open <url>` | 打开面板并导航（默认只允许 localhost/127.0.0.1 与配置的主机） |
 | `/transom demo` | 启动本地演示页（计数、表单、列表、canvas、shadow DOM、iframe、长滚动）并打开 |
+| `/transom attach <port>` | 连接已用 `--remote-debugging-port=<port>` 启动的 Chrome；`/transom close` 只断开，不关闭浏览器 |
 | `/transom audit` | 最近 20 条审计 |
-| `/transom close` | 关闭面板并停止浏览器 |
+| `/transom close` | 关闭面板并停止浏览器（attach 模式下仅断开连接） |
+
+### 连接到你自己启动的浏览器
+
+除自行启动浏览器外，Transom 也可以镜像并控制一个已在运行的 Chrome。先用调试端口启动 Chrome（该参数只对新进程生效，请先完全退出 Chrome），再连接：
+
+```text
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir=%TEMP%\transom-chrome
+/transom attach 9222
+```
+
+面板会接管第一个标签页（优先 http/https 页面）并原地操作；`/transom close` 只断开，Chrome 继续运行。把临时目录换成你常用的 profile 目录即可继承该浏览器的 Cookie 与登录状态。详见 [`docs/SECURITY.md`](docs/SECURITY.md)。
 
 ## 模型工具
 
@@ -214,7 +226,7 @@ ref 必须来自应用自身的对象身份，不能是坐标或下标。ref 失
 
 ## 安全
 
-见 [`docs/SECURITY.md`](docs/SECURITY.md)。简述：bridge 是回环 HTTP 服务，每次启动生成随机 bearer token 并拒绝浏览器 `Origin`；Chrome 使用一次性 profile；导航仅 http(s) 且受主机白名单约束；密码值遮蔽；页面文本是不可信数据，不是指令；所有动作入审计。
+见 [`docs/SECURITY.md`](docs/SECURITY.md)。简述：bridge 是回环 HTTP 服务，每次启动生成随机 bearer token 并拒绝浏览器 `Origin`；Chrome 使用一次性 profile（attach 模式沿用你自己启动的浏览器）；导航仅 http(s) 且受主机白名单约束；密码值遮蔽；页面文本是不可信数据，不是指令；所有动作入审计。
 
 已知非目标：模型点击链接可能以副作用的方式跳到白名单外主机。`confirm`/`once` 策略下这次点击本身要确认；`auto` 放弃这层保护。
 
