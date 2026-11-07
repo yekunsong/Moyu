@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.claude-plugin/types/
+*.log
+.DS_Store
+.env
+.tmp/
+coverage/
