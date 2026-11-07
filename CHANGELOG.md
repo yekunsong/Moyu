@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/). This project is early access; minor versions may change the engine-facing surface.
 
+## [Unreleased]
+
+### Added
+
+- Session host grants: `/transom allow <host|url>` and `/transom deny <host|url>` override the configured allowlist for the rest of the session (deny wins, including over `localhost`) and are audited as `person allow` / `person deny`.
+- Click confirmations name a link's destination alongside its accessible name.
+- `check` / `uncheck` actions (and `browser_act` kinds) for checkboxes and radios: they no-op when the state already matches and report `already checked` / `already unchecked`.
+- Snapshot fields carry nearby validation text (`error`), projected as `error="..."` in snapshot text and drawn as a dim `! ...` line under the row in the pane.
+- The demo fixture's required Email field shows an `aria-describedby` error.
+- README (English and Chinese): session grant commands, permission note, and the expanded action list.
+
 ## [0.1.0] - 2026-11-07
 
 ### Added

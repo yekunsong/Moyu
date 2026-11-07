@@ -15,6 +15,8 @@ export type ViewRow = {
   href?: string
   options?: Array<{ value: string; label: string; selected?: boolean }>
   invalid?: boolean
+  /** Validation text shown under an invalid row. */
+  error?: string
   flags?: string
   submits?: boolean
   /** The section a row belongs to; a `role: 'section'` row is the heading itself. */
@@ -417,6 +419,7 @@ export function projectRows(snapshot: Snapshot, limit: number): ViewRow[] {
         selected: option.selected,
       })),
       invalid: node.invalid,
+      error: node.error?.slice(0, 120),
       flags: flagsOf(node),
       submits: node.submits,
       section: rowSection,
@@ -472,6 +475,7 @@ function nodeLine(node: Snapshot['nodes'][number]): string {
   if (node.value !== undefined) bits.push(`= ${JSON.stringify(node.value)}`)
   if (node.href) bits.push(`href=${JSON.stringify(node.href.slice(0, 300))}`)
   if (node.options?.length) bits.push(optionsText(node.options))
+  if (node.invalid && node.error) bits.push(`error=${JSON.stringify(clean(node.error).slice(0, 120))}`)
   const flags = flagsOf(node)
   if (flags) bits.push(`(${flags})`)
   return bits.join(' ')
@@ -584,7 +588,11 @@ function optionsText(options: Array<{ value: string; label: string; selected?: b
 function targetLabel(action: Action, snapshot: Snapshot | undefined): string {
   if (!snapshot || !('ref' in action)) return ''
   const node = snapshot.nodes.find(one => one.ref === action.ref)
-  return node?.name ? ` "${clean(node.name)}"` : ''
+  if (!node) return ''
+  const name = node.name ? ` "${clean(node.name)}"` : ''
+  // A link's destination is part of what the person is approving.
+  const href = node.href ? ` -> ${clean(node.href).slice(0, 120)}` : ''
+  return `${name}${href}`
 }
 
 function clean(value: string): string {

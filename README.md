@@ -125,8 +125,12 @@ The model's write is confirmed before it runs. `/transom audit` shows both actio
 | `/transom open <url>` | Open the pane and navigate (localhost/127.0.0.1 and configured hosts by default) |
 | `/transom demo` | Start the local fixture (counter, form, list, canvas, shadow DOM, iframe, long scroller) and open it |
 | `/transom attach <port>` | Attach to a Chrome already running with `--remote-debugging-port=<port>`; `/transom close` detaches without closing it |
+| `/transom allow <host\|url>` | Allow a host for this session (exact or `*.` wildcard); outranks the configured allowlist and is audited |
+| `/transom deny <host\|url>` | Deny a host for this session; wins over both the allowlist and a session allow, and is audited |
 | `/transom audit` | Show the last 20 audit entries |
 | `/transom close` | Close the pane and stop the browser (in attach mode: detach only) |
+
+Session grants are the person's live word: `/transom allow` and `/transom deny` accept a hostname or a full URL, apply for the rest of the session only, and are recorded in the audit as `person allow <host>` / `person deny <host>`. A deny always wins, including over `localhost` and over a session allow; run the opposite command to reverse an earlier grant.
 
 ### Attach to a browser you started
 
@@ -147,7 +151,7 @@ The pane connects to the first tab (preferring an http/https page) and drives it
 | `mcp__transom__browser_snapshot` | read | Structured page snapshot; `sinceLast: true` returns only added/removed/changed refs |
 | `mcp__transom__browser_find` | read | Filter the current snapshot by text, role or interactivity without re-reading the page |
 | `mcp__transom__browser_wait` | read | Wait for a CSS selector, body text or network idle; a timeout is a normal result |
-| `mcp__transom__browser_act` | read/write | `click`, `clickAt` (viewport px), `fill`, `select`, `press`, `scroll`, `hover`, `focus`, `navigate`, `back`, `forward`, `reload` |
+| `mcp__transom__browser_act` | read/write | `click`, `check`, `uncheck`, `clickAt` (viewport px), `fill`, `select`, `press`, `scroll`, `hover`, `focus`, `navigate`, `back`, `forward`, `reload` |
 | `mcp__transom__browser_screenshot` | read | Capture the viewport as a PNG for visual checks |
 | `mcp__transom__browser_audit` | read | Recent actions with actor and outcome |
 
@@ -169,7 +173,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 
 | Option | Default | Meaning |
 |---|---|---|
-| `allowedHosts` | `localhost,127.0.0.1` | Comma-separated hosts; localhost is always allowed. Wildcards: `*.example.org`. |
+| `allowedHosts` | `localhost,127.0.0.1` | Comma-separated hosts; localhost is always allowed. Wildcards: `*.example.org`. Session grants from `/transom allow` / `/transom deny` override this for the current session. |
 | `writePolicy` | `confirm` | `confirm` (each write), `once` (first write per session; submits still confirmed), `auto` |
 | `snapshotMaxChars` | `12000` | Hard character cap on a snapshot handed to the model |
 

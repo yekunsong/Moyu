@@ -125,8 +125,12 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 | `/transom open <url>` | 打开面板并导航（默认只允许 localhost/127.0.0.1 与配置的主机） |
 | `/transom demo` | 启动本地演示页（计数、表单、列表、canvas、shadow DOM、iframe、长滚动）并打开 |
 | `/transom attach <port>` | 连接已用 `--remote-debugging-port=<port>` 启动的 Chrome；`/transom close` 只断开，不关闭浏览器 |
+| `/transom allow <host\|url>` | 本次会话允许某主机（精确匹配或 `*.` 通配）；优先于配置白名单，并写入审计 |
+| `/transom deny <host\|url>` | 本次会话拒绝某主机；优先于配置白名单与会话允许，并写入审计 |
 | `/transom audit` | 最近 20 条审计 |
 | `/transom close` | 关闭面板并停止浏览器（attach 模式下仅断开连接） |
+
+会话授权以人的实时决定为准：`/transom allow` 与 `/transom deny` 接受主机名或完整 URL，仅在本次会话内生效，并以 `person allow <host>` / `person deny <host>` 写入审计。拒绝始终优先（包括 `localhost` 与会话允许）；再执行相反命令即可撤销先前的授权。
 
 ### 连接到你自己启动的浏览器
 
@@ -147,7 +151,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 | `mcp__transom__browser_snapshot` | 读 | 结构化快照；`sinceLast: true` 只回新增/移除/变化的 ref |
 | `mcp__transom__browser_find` | 读 | 在当前快照里按文本、role 或可交互性过滤，不重新读页面 |
 | `mcp__transom__browser_wait` | 读 | 等待 CSS selector、正文文本或网络空闲；超时是正常结果 |
-| `mcp__transom__browser_act` | 读/写 | `click`、`clickAt`（视口像素）、`fill`、`select`、`press`、`scroll`、`hover`、`focus`、`navigate`、`back`、`forward`、`reload` |
+| `mcp__transom__browser_act` | 读/写 | `click`、`check`、`uncheck`、`clickAt`（视口像素）、`fill`、`select`、`press`、`scroll`、`hover`、`focus`、`navigate`、`back`、`forward`、`reload` |
 | `mcp__transom__browser_screenshot` | 读 | 截取可见区 PNG，用于视觉检查 |
 | `mcp__transom__browser_audit` | 读 | 最近动作及其发起者与结果 |
 
@@ -169,7 +173,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 
 | 选项 | 默认值 | 含义 |
 |---|---|---|
-| `allowedHosts` | `localhost,127.0.0.1` | 逗号分隔的主机；localhost 恒允许。支持 `*.example.org` 通配。 |
+| `allowedHosts` | `localhost,127.0.0.1` | 逗号分隔的主机；localhost 恒允许。支持 `*.example.org` 通配。`/transom allow` 与 `/transom deny` 的会话授权会覆盖本项。 |
 | `writePolicy` | `confirm` | `confirm`（每次写）、`once`（会话内首次写；提交类动作仍确认）、`auto` |
 | `snapshotMaxChars` | `12000` | 交给模型的快照字符硬上限 |
 

@@ -24,6 +24,8 @@ export type SnapshotNode = {
   href?: string
   options?: Array<{ value: string; label: string; selected?: boolean }>
   invalid?: boolean
+  /** Nearby validation text; only present when the field is invalid. */
+  error?: string
   interactive?: boolean
   submits?: boolean
   state?: {
@@ -57,6 +59,8 @@ export type Snapshot = {
 
 export type Action =
   | { kind: 'click'; ref: string }
+  | { kind: 'check'; ref: string }
+  | { kind: 'uncheck'; ref: string }
   | { kind: 'fill'; ref: string; text: string }
   | { kind: 'select'; ref: string; value: string }
   | { kind: 'focus'; ref: string }

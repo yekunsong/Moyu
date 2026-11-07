@@ -71,7 +71,7 @@ const ACT_SCHEMA = {
   properties: {
     kind: {
       type: 'string',
-      enum: ['click', 'clickAt', 'fill', 'select', 'press', 'scroll', 'hover', 'focus', 'navigate', 'back', 'forward', 'reload', 'wait'],
+      enum: ['click', 'check', 'uncheck', 'clickAt', 'fill', 'select', 'press', 'scroll', 'hover', 'focus', 'navigate', 'back', 'forward', 'reload', 'wait'],
     },
     ref: { type: 'string', description: 'Node ref from the latest snapshot, e.g. "t12".' },
     x: { type: 'number', description: 'Viewport CSS pixel x for clickAt.' },
@@ -114,7 +114,7 @@ export async function registerToolSpecs($: EngineInterface): Promise<void> {
     await $.tool.register({
       name: 'browser_act',
       description:
-        'Perform one action on the page: click, clickAt, fill, select, press, scroll, hover, focus, navigate, back, forward, reload. clickAt uses viewport CSS pixels (x, y) instead of a ref. Returns the action result and an audit id. Retake the snapshot after stale-ref errors.',
+        'Perform one action on the page: click, check, uncheck, clickAt, fill, select, press, scroll, hover, focus, navigate, back, forward, reload. check/uncheck drive a checkbox (or check a radio) and no-op when the state already matches. clickAt uses viewport CSS pixels (x, y) instead of a ref. Returns the action result and an audit id. Retake the snapshot after stale-ref errors.',
       inputSchema: ACT_SCHEMA,
       isDeferred: false,
     })
@@ -230,6 +230,9 @@ function toAction(input: Record<string, unknown>): Action | string {
   switch (kind) {
     case 'click':
       return ref ? { kind, ref } : 'ref is required for click'
+    case 'check':
+    case 'uncheck':
+      return ref ? { kind, ref } : `ref is required for ${kind}`
     case 'clickAt': {
       const x = input.x
       const y = input.y

@@ -173,6 +173,18 @@ export const SNAPSHOT = String.raw`
   // Declared before walk(): the snapshot uses it for option labels and hrefs.
   const clean = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()
 
+  // Validation text near a field: first the ids in aria-describedby, then the
+  // nearest alert/error marker. Deliberately shallow: no page-wide scans.
+  const errorTextOf = el => {
+    const describedBy = el.getAttribute('aria-describedby') || ''
+    const ids = describedBy.split(/\s+/).filter(Boolean)
+    let text = ids.map(id => document.getElementById(id)?.textContent || '').join(' ')
+    if (!clean(text)) text = el.closest('[role=alert]')?.textContent || ''
+    if (!clean(text)) text = el.closest('.error')?.textContent || ''
+    if (!clean(text)) text = el.closest('[data-error]')?.textContent || ''
+    return clean(text).slice(0, 120)
+  }
+
   const stateOf = el => {
     const out = {}
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') out.disabled = true
@@ -228,6 +240,8 @@ export const SNAPSHOT = String.raw`
       (el.getAttribute('aria-invalid') === 'true' || (el.required && valueOf(el) === ''))
     ) {
       node.invalid = true
+      const error = errorTextOf(el)
+      if (error) node.error = error
     }
     if (el.tagName === 'BUTTON' && (el.getAttribute('type') || '').toLowerCase() === 'submit') node.submits = true
     if (el.tagName === 'INPUT' && (el.getAttribute('type') || '').toLowerCase() === 'submit') node.submits = true
@@ -325,6 +339,33 @@ export const ACT = String.raw`
       return { ok: true, changed: true, message: 'scrolled to ' + describe(el), at: point }
     }
     return { ok: true, changed: true, at: { x: innerWidth / 2, y: innerHeight / 2 } }
+  }
+
+  if (action.kind === 'check' || action.kind === 'uncheck') {
+    const el = find(action.ref)
+    if (!el) return { ok: false, stale: true, message: 'ref ' + action.ref + ' is stale' }
+    const type = el.tagName === 'INPUT' ? String(el.getAttribute('type') || '').toLowerCase() : ''
+    if (el.tagName !== 'INPUT' || (type !== 'checkbox' && type !== 'radio')) {
+      return { ok: false, changed: false, message: describe(el) + ' is not a checkbox or radio' }
+    }
+    const desired = action.kind === 'check'
+    if (!!el.checked === desired) {
+      return {
+        ok: true,
+        changed: false,
+        message: (desired ? 'already checked ' : 'already unchecked ') + describe(el),
+      }
+    }
+    // Clicking a checked radio cannot clear it, and reporting success would lie.
+    if (type === 'radio' && !desired) {
+      return { ok: false, changed: false, message: 'a radio cannot be unchecked; choose another option instead' }
+    }
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+    el.focus?.({ preventScroll: true })
+    el.click()
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return { ok: true, changed: true, message: (desired ? 'checked ' : 'unchecked ') + describe(el) }
   }
 
   if (action.kind === 'fill') {

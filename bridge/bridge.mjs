@@ -420,7 +420,7 @@ async function actInner(action) {
     // A timeout is a normal result, not an error; a missing condition is not.
     return { ok: false, changed: false, message: 'wait requires selector, text or idleMs' }
   }
-  const simpleKinds = ['click', 'hover', 'fill', 'select', 'focus']
+  const simpleKinds = ['click', 'hover', 'fill', 'select', 'focus', 'check', 'uncheck']
   if (simpleKinds.includes(action.kind)) {
     const result = await evalInPage(`(${ACT})(${JSON.stringify(action)})`)
     if (result?.at) {

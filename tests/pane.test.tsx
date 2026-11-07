@@ -469,3 +469,115 @@ test('browser_wait maps to a read-only wait action', async ($, on) => {
   const missing = await tool($, 'browser_wait', {})
   expect(missing.text ?? '').toContain('wait requires at least one of selector, text or idleMs')
 })
+
+async function command($: unknown, args: string) {
+  return await ($ as { command: { run: (e: unknown) => Promise<{ text?: string }> } }).command.run({
+    command: 'transom',
+    args,
+  })
+}
+
+test('a session allow grant navigates without an ask', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const granted = await command($, 'allow elsewhere.test')
+  expect(granted.text ?? '').toContain('Allowed elsewhere.test')
+
+  const navigated = await tool($, 'browser_act', { kind: 'navigate', url: 'https://elsewhere.test/path' })
+  expect(navigated.text ?? '').toContain('ok')
+  expect(bottom.page.url).toBe('https://elsewhere.test/path')
+  expect(bottom.asks.length).toBe(0)
+})
+
+test('a session deny grant refuses navigation without an ask', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const denied = await command($, 'deny https://blocked.test/secret')
+  expect(denied.text ?? '').toContain('Denied blocked.test')
+
+  const navigated = await tool($, 'browser_act', { kind: 'navigate', url: 'https://blocked.test/' })
+  expect(navigated.text ?? '').toContain('host is denied for this session')
+  expect(bottom.page.url).toBe('http://127.0.0.1:1/')
+  expect(bottom.asks.length).toBe(0)
+})
+
+test('allow and deny reject a malformed host', async ($, on) => {
+  installBottom(on)
+  load(on)
+  await start($)
+  const bad = await command($, 'allow not a host!')
+  expect(bad.text ?? '').toContain('usage: /transom allow')
+})
+
+test('a click confirmation names the link target', async ($, on) => {
+  const bottom = installBottom(on)
+  bottom.answerAsk('Deny')
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const clicked = await tool($, 'browser_act', { kind: 'click', ref: 't5' })
+  expect(clicked.text ?? '').toContain('denied')
+  expect(bottom.asks.at(-1) ?? '').toContain('frame.html')
+  expect(bottom.asks.at(-1) ?? '').toContain('Frame page')
+})
+
+test('check and uncheck record the action and no-op when already set', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const checked = await tool($, 'browser_act', { kind: 'check', ref: 't6' })
+  expect(checked.text ?? '').toContain('ok')
+  expect(bottom.page.checkCalls.at(-1)).toEqual({ kind: 'check', ref: 't6' })
+  expect(bottom.page.checked['t6']).toBe(true)
+  expect(bottom.asks.at(-1) ?? '').toContain('check t6')
+
+  const again = await tool($, 'browser_act', { kind: 'check', ref: 't6' })
+  expect(again.text ?? '').toContain('already checked')
+  expect(bottom.page.checkCalls.length).toBe(2)
+
+  const unchecked = await tool($, 'browser_act', { kind: 'uncheck', ref: 't6' })
+  expect(unchecked.text ?? '').toContain('ok')
+  expect(bottom.page.checkCalls.at(-1)).toEqual({ kind: 'uncheck', ref: 't6' })
+  expect(bottom.page.checked['t6']).toBe(false)
+})
+
+test('check requires a ref', async ($, on) => {
+  installBottom(on)
+  load(on)
+  await start($)
+  const outcome = await tool($, 'browser_act', { kind: 'check' })
+  expect(outcome.text ?? '').toContain('ref is required for check')
+})
+
+test('an invalid field draws its error text under the row', async ($, on) => {
+  installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  const error = await ui.find({ type: 'Text', text: /We need an email/ })
+  expect(error, 'error text').toBeDefined()
+  expect(error?.text ?? '').toContain('! We need an email')
+  // The field itself stays an Input, never a Button.
+  expect(await ui.find({ type: 'Input', key: 't2' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 't2' })).toBeUndefined()
+  await ui.unmount()
+})

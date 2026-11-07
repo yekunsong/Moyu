@@ -6,6 +6,8 @@ export type ViewRow = {
   href?: string
   options?: Array<{ value: string; label: string; selected?: boolean }>
   invalid?: boolean
+  /** Validation text shown under an invalid row. */
+  error?: string
   flags?: string
   submits?: boolean
   /** The section a row belongs to; a `role: 'section'` row is the heading itself. */

@@ -49,7 +49,32 @@ test('auto and session grant allow writes', () => {
   expect(decide(configOf({ writePolicy: 'auto' }), { kind: 'click', ref: 't1' }, 'model', newGrant()).effect).toBe('allow')
 })
 
+test('session grants override the config for navigation', () => {
+  const grant = newGrant()
+  grant.hosts.add('elsewhere.test')
+  expect(decide(config, { kind: 'navigate', url: 'https://elsewhere.test/' }, 'model', grant)).toEqual({
+    effect: 'allow',
+    reason: 'host is allowed for this session',
+  })
+
+  grant.deniedHosts.add('example.com')
+  expect(decide(config, { kind: 'navigate', url: 'https://example.com/' }, 'model', grant)).toEqual({
+    effect: 'deny',
+    reason: 'host is denied for this session',
+  })
+  // Deny outranks a config allowlist and the local default.
+  grant.deniedHosts.add('localhost')
+  expect(decide(config, { kind: 'navigate', url: 'http://localhost/' }, 'person', grant).effect).toBe('deny')
+
+  // Wildcard grants match like the config allowlist.
+  const wildcard = newGrant()
+  wildcard.hosts.add('*.example.org')
+  expect(decide(config, { kind: 'navigate', url: 'https://docs.example.org/' }, 'model', wildcard).effect).toBe('allow')
+})
+
 test('classification marks submits', () => {
+  expect(classify({ kind: 'check', ref: 't1' }).submits).toBe(false)
+  expect(classify({ kind: 'uncheck', ref: 't1' }).level).toBe('write')
   expect(classify({ kind: 'click', ref: 't1' }).submits).toBe(true)
   expect(classify({ kind: 'fill', ref: 't1', text: '' }).submits).toBe(false)
 })

@@ -48,7 +48,9 @@ export function classify(action: Action): Classification {
       action.kind === 'back' || action.kind === 'forward' || action.kind === 'reload') {
     return { level: 'write', submits: true }
   }
-  if (action.kind === 'fill' || action.kind === 'select') return { level: 'write', submits: false }
+  if (action.kind === 'fill' || action.kind === 'select' || action.kind === 'check' || action.kind === 'uncheck') {
+    return { level: 'write', submits: false }
+  }
   if (READ_KINDS.has(action.kind)) return { level: 'read', submits: false }
   return { level: 'write', submits: false }
 }
@@ -61,11 +63,22 @@ export type Decision =
 export type SessionGrant = {
   onceWritten: boolean
   hosts: Set<string>
+  deniedHosts: Set<string>
   auto: boolean
 }
 
 export function newGrant(): SessionGrant {
-  return { onceWritten: false, hosts: new Set(), auto: false }
+  return { onceWritten: false, hosts: new Set(), deniedHosts: new Set(), auto: false }
+}
+
+/** A session grant matches exactly, or by a `*.` wildcard suffix. */
+export function grantMatches(grants: Set<string>, host: string): boolean {
+  const needle = host.toLowerCase()
+  for (const granted of grants) {
+    if (granted === needle) return true
+    if (granted.startsWith('*.') && needle.endsWith(granted.slice(1))) return true
+  }
+  return false
 }
 
 export function decide(
@@ -85,6 +98,13 @@ export function decide(
     }
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       return { effect: 'deny', reason: `scheme ${url.protocol} is not allowed` }
+    }
+    // Session grants are the person's live word and outrank the config.
+    if (grantMatches(grant.deniedHosts, url.hostname)) {
+      return { effect: 'deny', reason: 'host is denied for this session' }
+    }
+    if (grantMatches(grant.hosts, url.hostname)) {
+      return { effect: 'allow', reason: 'host is allowed for this session' }
     }
     if (!hostAllowed(config, url.hostname)) {
       return { effect: 'confirm', reason: `${url.hostname} is not on the allowed-hosts list` }
@@ -120,6 +140,10 @@ export function describeAction(action: Action): string {
   switch (action.kind) {
     case 'click':
       return `click ${action.ref}`
+    case 'check':
+      return `check ${action.ref}`
+    case 'uncheck':
+      return `uncheck ${action.ref}`
     case 'fill':
       return `fill ${action.ref} (${action.text.length} chars)`
     case 'select':

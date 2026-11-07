@@ -80,6 +80,24 @@ function clickPixel(cell: number, cells: number, pixels: number): number {
   return Math.max(0, Math.min(raw, Math.max(0, Math.round(pixels) - 1)))
 }
 
+/** A session host argument: a bare hostname or an http(s) URL. */
+const HOST_PATTERN = /^(\*\.)?[a-z0-9.-]+$/
+
+function parseHost(input: string): string | undefined {
+  const raw = input.trim()
+  if (!raw) return undefined
+  let host = raw
+  if (raw.includes('://')) {
+    try {
+      host = new URL(raw).hostname
+    } catch {
+      return undefined
+    }
+  }
+  host = host.toLowerCase()
+  return HOST_PATTERN.test(host) ? host : undefined
+}
+
 /** A section header with rules filling the pane's width: ── COUNTER ─────. */
 function sectionRule(label: string, width: number): string {
   const name = ` ${label} `
@@ -151,8 +169,9 @@ export const register: Register = (on, options) => {
     await registerToolSpecs($)
     await $.command.register({
       name: 'transom',
-      description: 'Transom pane: open a URL, run the demo, attach to Chrome, inspect the audit, switch to hq, close',
-      argumentHint: 'open <url> | demo | attach <port> | audit | hq | close',
+      description:
+        'Transom pane: open a URL, run the demo, attach to Chrome, allow or deny a host for the session, inspect the audit, switch to hq, close',
+      argumentHint: 'open <url> | demo | attach <port> | allow <host> | deny <host> | audit | hq | close',
     })
     await update($, view, () => EMPTY_VIEW)
     lastShot = { key: '', cells: '', columns: 0, rows: 0, url: '' }
@@ -209,6 +228,34 @@ export const register: Register = (on, options) => {
       return { text: attached.ok ? `attached to Chrome on port ${port}` : attached.message }
     }
 
+    if (verb === 'allow' || verb === 'deny') {
+      const host = parseHost(target)
+      if (!host) {
+        return {
+          text: `usage: /transom ${verb} <host|url> (for example example.com or https://example.com/path)`,
+        }
+      }
+      const allowed = verb === 'allow'
+      // The two sets are exclusive: a later grant reverses an earlier one.
+      if (allowed) {
+        transom.grant.deniedHosts.delete(host)
+        transom.grant.hosts.add(host)
+      } else {
+        transom.grant.hosts.delete(host)
+        transom.grant.deniedHosts.add(host)
+      }
+      await transom.audit.log({
+        actor: 'person',
+        provider: 'browser',
+        action: `${verb} ${host}`,
+        url: transom.view.url,
+        policy: 'person',
+        ok: true,
+        message: `session host ${allowed ? 'allowed' : 'denied'}`,
+      })
+      return { text: `${allowed ? 'Allowed' : 'Denied'} ${host} for this session.` }
+    }
+
     if (verb === 'close') {
       stopFrames()
       lastFrame = { file: '', generation: 0, columns: 0, rows: 0, pageWidth: 0, pageHeight: 0, url: '' }
@@ -263,7 +310,7 @@ export const register: Register = (on, options) => {
       return { text: opened.ok ? `opened ${transom.view.url}` : opened.message }
     }
 
-    return { text: 'usage: /transom open <url> | demo | attach <port> | audit | hq | close' }
+    return { text: 'usage: /transom open <url> | demo | attach <port> | allow <host> | deny <host> | audit | hq | close' }
   })
 
   on('ui.message', { requestId: PANE }, async ($, e) => {
@@ -481,7 +528,19 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const shown = model.rows.slice(0, room)
+    // Error lines consume a body line too, so the window never overflows.
+    const shown: ViewRow[] = []
+    let usedLines = 0
+    for (const row of model.rows) {
+      const cost = 1 + (row.invalid && row.error ? 1 : 0)
+      if (usedLines + cost > room) break
+      usedLines += cost
+      shown.push(row)
+    }
+    const rowError = (row: ViewRow) =>
+      row.invalid && row.error ? (
+        <Text key={`${row.ref}-error`} dimColor>! {clip(row.error, Math.max(0, width - 2))}</Text>
+      ) : null
     const firstSection = shown.find(one => one.role === 'section')?.ref
     return (
       <Box flexDirection="column" width="100%">
@@ -497,14 +556,15 @@ export const register: Register = (on, options) => {
             )
           }
           if (row.role === 'text' || row.role === 'heading') {
-            return (
+            return [
               <Text key={row.ref} dimColor={row.role === 'text'} bold={row.role === 'heading'}>
                 {indentFor(row)}{row.role === 'heading' ? '#' : '·'} {row.label}
-              </Text>
-            )
+              </Text>,
+              rowError(row),
+            ]
           }
           if (row.role === 'textbox' || row.role === 'searchbox') {
-            return (
+            return [
               <Input
                 key={row.ref}
                 label={`${indentFor(row)}${glyphFor(row)} ${row.label}`}
@@ -513,12 +573,13 @@ export const register: Register = (on, options) => {
                 onSubmit={text => {
                   void transom.act({ kind: 'fill', ref: row.ref, text }, 'person')
                 }}
-              />
-            )
+              />,
+              rowError(row),
+            ]
           }
           const options = row.role === 'combobox' || row.role === 'listbox' ? selectOptions(row) : []
           if (options.length) {
-            return (
+            return [
               <Select
                 key={row.ref}
                 label={`${indentFor(row)}${glyphFor(row)} ${row.label}`}
@@ -527,10 +588,11 @@ export const register: Register = (on, options) => {
                 onSelect={value => {
                   void transom.act({ kind: 'select', ref: row.ref, value }, 'person')
                 }}
-              />
-            )
+              />,
+              rowError(row),
+            ]
           }
-          return (
+          return [
             <Button key={row.ref} plain onPress={() => void pressRow(ops, transom, row)}>
               <Text dimColor={row.flags?.includes('disabled')}>
                 {indentFor(row)}{glyphFor(row)} {row.label}
@@ -538,8 +600,9 @@ export const register: Register = (on, options) => {
                 {row.href ? <Text dimColor> → {shortHref(row.href)}</Text> : null}
                 {row.flags ? <Text dimColor> [{row.flags}]</Text> : null}
               </Text>
-            </Button>
-          )
+            </Button>,
+            rowError(row),
+          ]
         })}
         {model.rows.length > shown.length ? (
           <Button key="next" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: room }, 'person')}>

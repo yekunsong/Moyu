@@ -14,6 +14,8 @@ export type FakePage = {
   selects: Record<string, string>
   fillCalls: Array<{ ref: string; text: string }>
   selectCalls: Array<{ ref: string; value: string }>
+  checked: Record<string, boolean>
+  checkCalls: Array<{ kind: string; ref: string }>
   scrollCalls: Array<{ dx: number; dy: number }>
   clickAtCalls: Array<{ x: number; y: number }>
   waitCalls: Array<{ kind: string; selector?: string; text?: string; idleMs?: number; timeoutMs?: number }>
@@ -44,6 +46,8 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     selects: {},
     fillCalls: [],
     selectCalls: [],
+    checked: {},
+    checkCalls: [],
     scrollCalls: [],
     clickAtCalls: [],
     waitCalls: [],
@@ -146,7 +150,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
         nodes: [
           { ref: 'h1', role: 'heading', name: 'COUNTER', depth: 0, bounds: { x: 0, y: 0, w: 10, h: 1 } },
           { ref: 't1', role: 'button', name: 'Increase count', depth: 1, interactive: true, bounds: { x: 0, y: 0, w: 10, h: 2 } },
-          { ref: 't2', role: 'textbox', name: 'Email', depth: 1, interactive: true, value: page.fills['t2'] ?? '', invalid: true, bounds: { x: 0, y: 2, w: 10, h: 2 } },
+          { ref: 't2', role: 'textbox', name: 'Email', depth: 1, interactive: true, value: page.fills['t2'] ?? '', invalid: true, error: 'We need an email', bounds: { x: 0, y: 2, w: 10, h: 2 } },
           { ref: 't3', role: 'text', name: `count ${page.count}`, depth: 1, bounds: { x: 0, y: 4, w: 10, h: 1 } },
           {
             ref: 't4',
@@ -163,6 +167,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
             bounds: { x: 0, y: 5, w: 10, h: 2 },
           },
           { ref: 't5', role: 'link', name: 'Frame page', depth: 1, interactive: true, href: 'http://127.0.0.1:1/frame.html', bounds: { x: 0, y: 7, w: 10, h: 1 } },
+          { ref: 't6', role: 'checkbox', name: 'Done: Buy milk', depth: 1, interactive: true, state: { checked: page.checked['t6'] ?? false }, bounds: { x: 0, y: 8, w: 2, h: 1 } },
           // Enough filler to overflow the pane window, placed after the rows the
           // existing tests reach for.
           ...Array.from({ length: 30 }, (_, index) => ({
@@ -195,6 +200,22 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
         })
       }
       if (body.kind === 'click' && body.ref === 't1') page.count += 1
+      if (body.kind === 'check' || body.kind === 'uncheck') {
+        const desired = body.kind === 'check'
+        const already = (page.checked[body.ref] ?? false) === desired
+        page.checked[body.ref] = desired
+        page.checkCalls.push({ kind: body.kind, ref: body.ref })
+        return value({
+          status: 200,
+          ok: true,
+          headers: {},
+          text: JSON.stringify({
+            ok: true,
+            changed: !already,
+            message: `${already ? 'already ' : ''}${desired ? 'checked' : 'unchecked'} fake`,
+          }),
+        })
+      }
       if (body.kind === 'fill') {
         page.fills[body.ref] = body.text
         page.fillCalls.push({ ref: body.ref, text: body.text })

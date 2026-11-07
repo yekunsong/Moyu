@@ -46,11 +46,12 @@
   <div class="card">
     <form id="signup">
       <div class="row" style="margin-bottom:8px">
-        <input name="email" type="email" placeholder="you@example.com" aria-label="Email" required />
+        <input name="email" type="email" placeholder="you@example.com" aria-label="Email" aria-describedby="email-err" required />
         <input name="password" type="password" placeholder="Password" aria-label="Password" required />
         <input name="pin" type="PASSWORD" aria-label="PIN" placeholder="PIN" />
         <input name="bare" type="password" />
       </div>
+      <span id="email-err" style="display:block;font-size:12px;color:#8a6d3b;margin:-4px 0 8px">We need an email</span>
       <div class="row">
         <select name="plan" aria-label="Plan">
           <option value="free">Free</option>

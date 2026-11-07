@@ -100,6 +100,7 @@ test('select options, link href and invalid state are in the snapshot', async ()
 
   const email = snap.nodes.find(node => node.role === 'textbox' && node.name === 'Email')
   assert.equal(email.invalid, true, 'required empty field is invalid')
+  assert.equal(email.error, 'We need an email', 'the aria-describedby text rides with the field')
 })
 
 test('a todo checkbox carries its checked state', async () => {
@@ -115,6 +116,50 @@ test('a todo checkbox carries its checked state', async () => {
   const checkbox = after.nodes.find(node => node.role === 'checkbox' && node.name === 'Done: Buy milk')
   assert.ok(checkbox, 'todo checkbox present')
   assert.equal(checkbox.state.checked, false)
+})
+
+test('check and uncheck drive a checkbox and report no-ops', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  const todo = snap.nodes.find(node => node.name === 'New todo')
+  assert.ok(todo, 'todo input present')
+  await json('/act', { action: { kind: 'fill', ref: todo.ref, text: 'Walk dog' } })
+  await json('/act', { action: { kind: 'press', key: 'Enter' } })
+
+  const withTodo = (await json('/snapshot', { maxChars: 50000 })).body
+  const checkbox = withTodo.nodes.find(node => node.role === 'checkbox' && node.name === 'Done: Walk dog')
+  assert.ok(checkbox, 'the new todo checkbox is in the snapshot')
+  assert.equal(checkbox.state.checked, false)
+
+  const checked = await json('/act', { action: { kind: 'check', ref: checkbox.ref } })
+  assert.equal(checked.body.ok, true)
+  assert.equal(checked.body.changed, true)
+  let state = (await json('/snapshot', { maxChars: 50000 })).body.nodes.find(node => node.ref === checkbox.ref)
+  assert.equal(state.state.checked, true)
+
+  const again = await json('/act', { action: { kind: 'check', ref: checkbox.ref } })
+  assert.equal(again.body.ok, true)
+  assert.equal(again.body.changed, false)
+  assert.match(again.body.message, /already checked/)
+
+  const unchecked = await json('/act', { action: { kind: 'uncheck', ref: checkbox.ref } })
+  assert.equal(unchecked.body.ok, true)
+  assert.equal(unchecked.body.changed, true)
+  state = (await json('/snapshot', { maxChars: 50000 })).body.nodes.find(node => node.ref === checkbox.ref)
+  assert.equal(state.state.checked, false)
+
+  const stillUnchecked = await json('/act', { action: { kind: 'uncheck', ref: checkbox.ref } })
+  assert.equal(stillUnchecked.body.ok, true)
+  assert.equal(stillUnchecked.body.changed, false)
+  assert.match(stillUnchecked.body.message, /already unchecked/)
+
+  // A non-checkbox target is refused with a clear message.
+  const button = (await json('/snapshot', { scope: 'document', maxChars: 200000 })).body.nodes.find(
+    node => node.name === 'Increase count',
+  )
+  const wrong = await json('/act', { action: { kind: 'check', ref: button.ref } })
+  assert.equal(wrong.body.ok, false)
+  assert.match(wrong.body.message, /not a checkbox or radio/)
 })
 
 test('click, fill, select and submit work through refs', async () => {
