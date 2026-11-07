@@ -77,7 +77,7 @@ Moving the window into the terminal is a side effect. The product is **structure
 
 ## Status
 
-v0.1, early access. The Claude Code function-hooks API is early access and may change between releases. Milestones M0–M5 are complete; see [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for the design, deviations and verified findings.
+v0.1, early access. The Claude Code function-hooks API is early access and may change between releases. Milestones M0–M5 are complete; see [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for the design, deviations and verified findings. The phased 0.2 plan (text UI, HQ image tier, attach mode, Linux, UX fixes) is in [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md).
 
 ## Requirements
 
