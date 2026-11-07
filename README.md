@@ -2,6 +2,8 @@
 
 > 在 Claude Code 会话里，为任意应用开一扇可看、可操作、可被模型调用的边窗。
 
+安装：`/plugin install transom --marketplace <owner>/<repo>`
+
 状态：v0.1 可用（M0–M4 完成；方案见 `docs/IMPLEMENTATION-PLAN.md`）
 日期：2026-11-07
 目标平台：Claude Code CLI（function hooks / Mods，early access）
