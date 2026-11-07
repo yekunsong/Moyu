@@ -37,7 +37,7 @@ export class Supervisor {
   async ensure(): Promise<Endpoint> {
     if (this.#phase === 'ready' && this.#endpoint) return this.#endpoint
     if (this.#phase === 'starting') {
-      for (let i = 0; i < 300; i++) {
+      for (let i = 0; i < 70; i++) {
         await this.#$sleep(100)
         if ((this.#phase as Phase) === 'ready' && this.#endpoint) return this.#endpoint
         if ((this.#phase as Phase) === 'failed') break

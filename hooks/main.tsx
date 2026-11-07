@@ -20,6 +20,7 @@ let lastShot: { key: string; cells: string; columns: number; rows: number } = {
 
 let hub: Hub | undefined
 let demo: { url: string } | undefined
+let demoStream: AsyncGenerator<unknown, unknown> | undefined
 
 function makeOps($: EngineInterface): Ops {
   return {
@@ -125,6 +126,7 @@ export const register: Register = (on, options) => {
     if (verb === 'close') {
       await transom.close()
       await ops.closePane(PANE)
+      stopDemo()
       return { text: 'Transom closed.' }
     }
 
@@ -338,6 +340,7 @@ export const register: Register = (on, options) => {
 
   on('session.end', async ($, e, next) => {
     if (hub) await hub.close()
+    stopDemo()
     return next(e)
   })
 }
@@ -391,12 +394,25 @@ async function runDemo(ops: Ops, transom: Hub): Promise<void> {
   await transom.open(demo.url, transom.provider.meta.defaultWidth)
 }
 
+function stopDemo(): void {
+  demo = undefined
+  const stream = demoStream
+  demoStream = undefined
+  if (!stream) return
+  try {
+    void stream.return(undefined)
+  } catch {
+    /* already ended */
+  }
+}
+
 async function startDemo(ops: Ops): Promise<{ url: string } | undefined> {
   try {
     const stream = ops.spawn({
       argv: ['node', `${ops.root}/demo/server.mjs`],
       env: { PORT: '0' },
     })
+    demoStream = stream as unknown as AsyncGenerator<unknown, unknown>
     let settled = false
     const line = await new Promise<string | undefined>(resolve => {
       const timer = ops.after(8000, () => {
