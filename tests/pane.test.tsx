@@ -326,6 +326,55 @@ test('hq draws an Image from the frame file on WezTerm', async ($, on) => {
   await ui.unmount()
 })
 
+test('the hq pointer overlay maps a click to page pixels', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    // 81x11 cells keeps both axes odd, so the center cell maps exactly to the
+    // center CSS pixel; the fake /frame reports 8x16 px per cell.
+    props: { ...PANE, bodyColumns: 81 },
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  await ui.press({ key: 'hq' })
+  expect(await ui.find({ type: 'Client', key: 'hq-pointer' }), 'pointer overlay').toBeDefined()
+
+  const columns = 81
+  const rows = 11
+  const cell = { x: Math.floor(columns / 2), y: Math.floor(rows / 2) }
+  await ui.pointer({ type: 'down', ...cell, button: 'left', in: 'hq-pointer' })
+  await ui.pointer({ type: 'up', ...cell, button: 'left', in: 'hq-pointer' })
+  await bottom.advance(16)
+
+  expect(bottom.page.clickAtCalls.length, 'clickAt recorded').toBeGreaterThan(0)
+  const call = bottom.page.clickAtCalls.at(-1)!
+  expect(Math.abs(call.x - (columns * 8) / 2), `x ${call.x}`).toBeLessThanOrEqual(2)
+  expect(Math.abs(call.y - (rows * 16) / 2), `y ${call.y}`).toBeLessThanOrEqual(2)
+  // A person's click is direct: the overlay never opens a confirmation.
+  expect(bottom.asks.length).toBe(0)
+  await ui.unmount()
+})
+
+test('a denied model clickAt does not run', async ($, on) => {
+  const bottom = installBottom(on)
+  bottom.answerAsk('Deny')
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const denied = await tool($, 'browser_act', { kind: 'clickAt', x: 100, y: 50 })
+  expect(denied.text ?? '').toContain('denied')
+  expect(bottom.page.clickAtCalls.length).toBe(0)
+  expect(bottom.asks.at(-1) ?? '').toContain('click at 100,50')
+})
+
 test('hq is hidden and explained on Windows Terminal', async ($, on) => {
   installBottom(on, { env: { WT_SESSION: 'session-1' } })
   load(on)

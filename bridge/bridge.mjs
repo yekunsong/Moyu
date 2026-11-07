@@ -242,6 +242,38 @@ async function act(action) {
     await sleep(60)
     return result
   }
+  if (action.kind === 'clickAt') {
+    // CSS pixels in the page viewport: clamp first, then describe what the
+    // point really hits so a misclick stays reviewable in the audit.
+    const wanted = JSON.stringify({ x: Number(action.x), y: Number(action.y) })
+    const hit = await evalInPage(`(() => {
+      const wanted = ${wanted}
+      const clamp = (value, max) => Math.max(0, Math.min(Math.round(Number.isFinite(value) ? value : 0), max - 1))
+      const x = clamp(wanted.x, innerWidth)
+      const y = clamp(wanted.y, innerHeight)
+      const el = document.elementFromPoint(x, y)
+      let desc = 'nothing'
+      if (el) {
+        const tag = el.tagName.toLowerCase()
+        const id = el.id ? '#' + el.id : ''
+        const aria = el.getAttribute && el.getAttribute('aria-label')
+        const text = String(aria || el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim()
+        desc = (tag + id + (text ? ' ' + text : '')).slice(0, 80)
+      }
+      return { x, y, desc }
+    })()`)
+    await cmd('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hit.x, y: hit.y })
+    await cmd('Input.dispatchMouseEvent', { type: 'mousePressed', x: hit.x, y: hit.y, button: 'left', buttons: 1, clickCount: 1 })
+    await cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', x: hit.x, y: hit.y, button: 'left', buttons: 0, clickCount: 1 })
+    await sleep(60)
+    return {
+      ok: true,
+      changed: true,
+      message: `clicked ${hit.desc} at ${hit.x},${hit.y}`,
+      at: { x: hit.x, y: hit.y },
+      element: hit.desc,
+    }
+  }
   if (action.kind === 'press') {
     const el = await evalInPage(`(() => { const el = document.activeElement; return el ? el.tagName : null })()`)
     await pressKey(action)

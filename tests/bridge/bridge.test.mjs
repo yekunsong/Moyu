@@ -142,6 +142,31 @@ test('click, fill, select and submit work through refs', async () => {
   assert.equal(pressed.body.ok, true)
 })
 
+test('clickAt clicks at viewport pixels and clamps out-of-bounds points', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  const inc = snap.nodes.find(node => node.name === 'Increase count')
+  assert.ok(inc, 'increase button present')
+  const x = Math.round(inc.bounds.x + inc.bounds.w / 2)
+  const y = Math.round(inc.bounds.y + inc.bounds.h / 2)
+
+  const clicked = await json('/act', { action: { kind: 'clickAt', x, y } })
+  assert.equal(clicked.status, 200)
+  assert.equal(clicked.body.ok, true)
+  assert.equal(clicked.body.changed, true)
+  assert.match(clicked.body.message, /clicked /)
+  assert.match(clicked.body.message, /Increase count/)
+
+  const after = (await json('/snapshot', { maxChars: 50000 })).body
+  const status = after.nodes.find(node => node.role === 'status')
+  assert.equal(status.name, '1')
+
+  const clamped = await json('/act', { action: { kind: 'clickAt', x: -50, y: -50 } })
+  assert.equal(clamped.status, 200)
+  assert.equal(clamped.body.ok, true)
+  assert.match(clamped.body.message, /at 0,0$/)
+})
+
 test('shadow DOM and same-origin frames are reachable', async () => {
   await json('/navigate', { url: demo.url })
   const snap = (await json('/snapshot', { scope: 'document', maxChars: 200000 })).body

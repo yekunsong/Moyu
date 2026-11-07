@@ -15,6 +15,7 @@ export type FakePage = {
   fillCalls: Array<{ ref: string; text: string }>
   selectCalls: Array<{ ref: string; value: string }>
   scrollCalls: Array<{ dx: number; dy: number }>
+  clickAtCalls: Array<{ x: number; y: number }>
 }
 
 export type Bottom = {
@@ -43,6 +44,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     fillCalls: [],
     selectCalls: [],
     scrollCalls: [],
+    clickAtCalls: [],
   }
   const asks: string[] = []
   const fetches: string[] = []
@@ -184,6 +186,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
         page.selectCalls.push({ ref: body.ref, value: body.value })
       }
       if (body.kind === 'scroll') page.scrollCalls.push({ dx: Number(body.dx) || 0, dy: Number(body.dy) || 0 })
+      if (body.kind === 'clickAt') page.clickAtCalls.push({ x: Number(body.x), y: Number(body.y) })
       if (body.kind === 'navigate') page.url = body.url
       return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, changed: true, message: `did ${body.kind}` }) })
     }

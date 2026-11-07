@@ -24,11 +24,21 @@ let lastShot: { key: string; cells: string; columns: number; rows: number; url: 
 // once a second while the pane is in image mode. Like lastShot, it lives in a
 // module variable rather than state: a reload drops it and the pane falls back
 // to text.
-let lastFrame: { file: string; generation: number; columns: number; rows: number; url: string } = {
+let lastFrame: {
+  file: string
+  generation: number
+  columns: number
+  rows: number
+  pageWidth: number
+  pageHeight: number
+  url: string
+} = {
   file: '',
   generation: 0,
   columns: 0,
   rows: 0,
+  pageWidth: 0,
+  pageHeight: 0,
   url: '',
 }
 let imageTier: ImageTier = { supported: false, reason: '' }
@@ -62,6 +72,12 @@ function shortHref(href: string): string {
 function clip(text: string, width: number): string {
   const max = Math.max(0, Math.floor(width))
   return text.length > max ? text.slice(0, max) : text
+}
+
+/** A cell inside the image maps to the CSS pixel at the center of that cell. */
+function clickPixel(cell: number, cells: number, pixels: number): number {
+  const raw = cells > 0 ? Math.round(((cell + 0.5) / cells) * pixels) : 0
+  return Math.max(0, Math.min(raw, Math.max(0, Math.round(pixels) - 1)))
 }
 
 /** A section header with rules filling the pane's width: ── COUNTER ─────. */
@@ -128,7 +144,7 @@ export const register: Register = (on, options) => {
       imageTier = { supported: false, reason: 'terminal detection failed' }
     }
     stopFrames()
-    lastFrame = { file: '', generation: 0, columns: 0, rows: 0, url: '' }
+    lastFrame = { file: '', generation: 0, columns: 0, rows: 0, pageWidth: 0, pageHeight: 0, url: '' }
     void hub!.provider.start().catch(error => {
       ops.log(`bridge start: ${String((error as Error).message ?? error)}`)
     })
@@ -185,7 +201,7 @@ export const register: Register = (on, options) => {
 
     if (verb === 'close') {
       stopFrames()
-      lastFrame = { file: '', generation: 0, columns: 0, rows: 0, url: '' }
+      lastFrame = { file: '', generation: 0, columns: 0, rows: 0, pageWidth: 0, pageHeight: 0, url: '' }
       await transom.close()
       await ops.closePane(PANE)
       stopDemo()
@@ -262,12 +278,26 @@ export const register: Register = (on, options) => {
         tmux: () => $.env.get('TMUX'),
       },
     }
-    const data = e.data as { kind?: string; key?: string }
+    const data = e.data as { kind?: string; key?: string; x?: number; y?: number }
     if (data.kind === 'key' && data.key) {
       const transom = ensureHub(ops, options as Record<string, unknown>, () => {
         void update($, view, () => hub!.view)
       })
       await transom.act({ kind: 'press', key: normaliseKey(data.key) }, 'person')
+    }
+    // The HQ overlay only exists while image frames are live; ignore stray
+    // cell posts from a stale client otherwise.
+    if (data.kind === 'cell' && frameActive && lastFrame.columns > 0 && lastFrame.rows > 0) {
+      const cellX = Number(data.x)
+      const cellY = Number(data.y)
+      if (Number.isFinite(cellX) && Number.isFinite(cellY)) {
+        const transom = ensureHub(ops, options as Record<string, unknown>, () => {
+          void update($, view, () => hub!.view)
+        })
+        const x = clickPixel(cellX, lastFrame.columns, lastFrame.pageWidth)
+        const y = clickPixel(cellY, lastFrame.rows, lastFrame.pageHeight)
+        await transom.act({ kind: 'clickAt', x, y }, 'person')
+      }
     }
     return {}
   })
@@ -417,14 +447,24 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column" width="100%">
           {header}
           {toolbar}
-          <Image
-            key="frame"
-            source={{ file: lastFrame.file, format: 'png', generation: lastFrame.generation }}
-            columns={width}
-            rows={frameRows}
-            alt="page screenshot"
-          />
-          <Text dimColor>read-only · switch to text to edit</Text>
+          <Box position="relative" width={width} height={frameRows}>
+            <Image
+              key="frame"
+              source={{ file: lastFrame.file, format: 'png', generation: lastFrame.generation }}
+              columns={width}
+              rows={frameRows}
+              alt="page screenshot"
+            />
+            <Box position="absolute" top={0} left={0} width="100%" height="100%">
+              <Client
+                key="hq-pointer"
+                module="../providers/browser/hq-pointer.tsx"
+                width="100%"
+                height="100%"
+              />
+            </Box>
+          </Box>
+          <Text dimColor>read-only · click the image to click the page · text mode to edit</Text>
           <Text key="status" dimColor>{statusLine(model, model.rows.length, width)}</Text>
           <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
         </Box>
@@ -604,6 +644,8 @@ async function startImage(
     generation: frame.generation,
     columns: frame.columns,
     rows: frame.rows,
+    pageWidth: frame.pageWidth,
+    pageHeight: frame.pageHeight,
     url: transom.view.url,
   }
   frameActive = true
@@ -637,6 +679,8 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
       generation: frame.generation,
       columns: frame.columns,
       rows: frame.rows,
+      pageWidth: frame.pageWidth,
+      pageHeight: frame.pageHeight,
       url: transom.view.url,
     }
     void $.ui.invalidate('ui.render')

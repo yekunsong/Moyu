@@ -132,7 +132,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 |---|---|---|
 | `mcp__transom__browser_open` | 写（导航） | 打开面板并导航；白名单外主机需确认 |
 | `mcp__transom__browser_snapshot` | 读 | 结构化快照：URL、标题、地标、带 ref 的节点 |
-| `mcp__transom__browser_act` | 读/写 | `click`、`fill`、`select`、`press`、`scroll`、`hover`、`focus`、`navigate`、`back`、`forward`、`reload` |
+| `mcp__transom__browser_act` | 读/写 | `click`、`clickAt`（视口像素）、`fill`、`select`、`press`、`scroll`、`hover`、`focus`、`navigate`、`back`、`forward`、`reload` |
 | `mcp__transom__browser_screenshot` | 读 | 截取可见区 PNG，用于视觉检查 |
 | `mcp__transom__browser_audit` | 读 | 最近动作及其发起者与结果 |
 
@@ -144,7 +144,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 - 点击一行立即执行（人看得到页面）。模型写操作按 `writePolicy` 确认。
 - 文本框与下拉框可直接在行内编辑：输入后回车，或选择选项，不再弹窗。
 - 行按页面标题分区，底部有固定状态栏；快照超长时用 `↓ next block` 翻页。
-- `visual` 切彩色格档；`hq` 显示真实 PNG 画面（kitty、Ghostty、WezTerm），约 1 秒刷新；再按一次回文本档。
+- `visual` 切彩色格档；`hq` 显示真实 PNG 画面（kitty、Ghostty、WezTerm），约 1 秒刷新，点击画面即点击页面；再按一次回文本档。
 - 点击底部键盘条后，按键转发给页面；Esc 交还提示符。
 - 窄于 48 列显示降级提示。
 

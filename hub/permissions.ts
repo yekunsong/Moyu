@@ -44,8 +44,8 @@ const READ_KINDS = new Set(['scroll', 'hover', 'focus'])
 
 export function classify(action: Action): Classification {
   if (action.kind === 'navigate') return { level: 'navigate', submits: true }
-  if (action.kind === 'click' || action.kind === 'press' || action.kind === 'back' ||
-      action.kind === 'forward' || action.kind === 'reload') {
+  if (action.kind === 'click' || action.kind === 'clickAt' || action.kind === 'press' ||
+      action.kind === 'back' || action.kind === 'forward' || action.kind === 'reload') {
     return { level: 'write', submits: true }
   }
   if (action.kind === 'fill' || action.kind === 'select') return { level: 'write', submits: false }
@@ -124,6 +124,8 @@ export function describeAction(action: Action): string {
       return `fill ${action.ref} (${action.text.length} chars)`
     case 'select':
       return `select ${action.value} in ${action.ref}`
+    case 'clickAt':
+      return `click at ${action.x},${action.y}`
     case 'press':
       return `press ${action.key}`
     case 'scroll':

@@ -132,7 +132,7 @@ The model's write is confirmed before it runs. `/transom audit` shows both actio
 |---|---|---|
 | `mcp__transom__browser_open` | write (navigation) | Open the pane and navigate; unlisted hosts require confirmation |
 | `mcp__transom__browser_snapshot` | read | Structured page snapshot: URL, title, landmarks, ref-tagged nodes |
-| `mcp__transom__browser_act` | read/write | `click`, `fill`, `select`, `press`, `scroll`, `hover`, `focus`, `navigate`, `back`, `forward`, `reload` |
+| `mcp__transom__browser_act` | read/write | `click`, `clickAt` (viewport px), `fill`, `select`, `press`, `scroll`, `hover`, `focus`, `navigate`, `back`, `forward`, `reload` |
 | `mcp__transom__browser_screenshot` | read | Capture the viewport as a PNG for visual checks |
 | `mcp__transom__browser_audit` | read | Recent actions with actor and outcome |
 
@@ -144,7 +144,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 - Clicking a row executes immediately (a person can see the page). Model writes are confirmed according to `writePolicy`.
 - Text fields and selects are edited inline: type and press Enter, or pick an option; no dialog.
 - Rows are grouped under page headings with a fixed status bar; `↓ next block` scrolls the page when the snapshot is longer than the pane.
-- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm), refreshed about once a second; both return to text with another press.
+- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm), refreshed about once a second, and clicking the picture clicks the page; both return to text with another press.
 - Click the keyboard strip to forward keys to the page; Esc returns them to the prompt.
 - Panes narrower than 48 columns show a degradation notice.
 

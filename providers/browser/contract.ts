@@ -63,6 +63,7 @@ export type Action =
   | { kind: 'hover'; ref: string }
   | { kind: 'press'; key: string; modifiers?: number }
   | { kind: 'scroll'; dx: number; dy: number }
+  | { kind: 'clickAt'; x: number; y: number }
   | { kind: 'navigate'; url: string }
   | { kind: 'back' }
   | { kind: 'forward' }

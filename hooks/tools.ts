@@ -47,9 +47,11 @@ const ACT_SCHEMA = {
   properties: {
     kind: {
       type: 'string',
-      enum: ['click', 'fill', 'select', 'press', 'scroll', 'hover', 'focus', 'navigate', 'back', 'forward', 'reload'],
+      enum: ['click', 'clickAt', 'fill', 'select', 'press', 'scroll', 'hover', 'focus', 'navigate', 'back', 'forward', 'reload'],
     },
     ref: { type: 'string', description: 'Node ref from the latest snapshot, e.g. "t12".' },
+    x: { type: 'number', description: 'Viewport CSS pixel x for clickAt.' },
+    y: { type: 'number', description: 'Viewport CSS pixel y for clickAt.' },
     text: { type: 'string', description: 'Text for fill.' },
     value: { type: 'string', description: 'Option value for select.' },
     key: { type: 'string', description: 'Key for press: Enter, Tab, Escape, arrows, PageDown, or a character.' },
@@ -78,7 +80,7 @@ export async function registerToolSpecs($: EngineInterface): Promise<void> {
     await $.tool.register({
       name: 'browser_act',
       description:
-        'Perform one action on the page by ref: click, fill, select, press, scroll, hover, focus, navigate, back, forward, reload. Returns the action result and an audit id. Retake the snapshot after stale-ref errors.',
+        'Perform one action on the page: click, clickAt, fill, select, press, scroll, hover, focus, navigate, back, forward, reload. clickAt uses viewport CSS pixels (x, y) instead of a ref. Returns the action result and an audit id. Retake the snapshot after stale-ref errors.',
       inputSchema: ACT_SCHEMA,
       isDeferred: false,
     })
@@ -164,6 +166,13 @@ function toAction(input: Record<string, unknown>): Action | string {
   switch (kind) {
     case 'click':
       return ref ? { kind, ref } : 'ref is required for click'
+    case 'clickAt': {
+      const x = input.x
+      const y = input.y
+      return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
+        ? { kind, x, y }
+        : 'x and y are required for clickAt'
+    }
     case 'fill':
       return ref ? { kind, ref, text: String(input.text ?? '') } : 'ref is required for fill'
     case 'select':
