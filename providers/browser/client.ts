@@ -7,6 +7,7 @@ import type {
   ActContext,
   ActResult,
   Capabilities,
+  Frame,
   Provider,
   ProviderMeta,
   Snapshot,
@@ -98,6 +99,14 @@ export class BrowserProvider implements Provider {
   async raster(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }> {
     const endpoint = await this.supervisor.ensure()
     return await fetchJson(this.ops, `${endpoint.url}/raster`, endpoint.token, {
+      method: 'POST',
+      body: { cols, rows },
+    })
+  }
+
+  async frame(cols: number, rows: number): Promise<Frame> {
+    const endpoint = await this.supervisor.ensure()
+    return await fetchJson<Frame>(this.ops, `${endpoint.url}/frame`, endpoint.token, {
       method: 'POST',
       body: { cols, rows },
     })

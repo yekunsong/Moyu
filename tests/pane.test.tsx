@@ -287,3 +287,62 @@ test('sections, status bar and the next-block button render', async ($, on) => {
   expect(bottom.page.scrollCalls.some(call => call.dy > 0), 'scroll recorded').toBe(true)
   await ui.unmount()
 })
+
+test('hq draws an Image from the frame file on WezTerm', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  expect(await ui.find({ type: 'Button', key: 'hq' }), 'hq button').toBeDefined()
+  await ui.press({ key: 'hq' })
+  expect(bottom.fetches.some(one => one.endsWith('/frame')), '/frame fetched').toBe(true)
+
+  const image = await ui.find({ type: 'Image', key: 'frame' })
+  expect(image, 'Image key frame').toBeDefined()
+  expect(JSON.stringify(image?.props.source)).toContain('/tmp/transom-test-frame.png')
+  expect(image?.props.alt ?? '').toContain('screenshot')
+  expect(await ui.find({ type: 'Text', text: /read-only/ }), 'read-only hint').toBeDefined()
+
+  // The 1 fps clock keeps fetching while image mode is active.
+  const framesBefore = bottom.fetches.filter(one => one.endsWith('/frame')).length
+  await bottom.advance(1100)
+  const framesAfter = bottom.fetches.filter(one => one.endsWith('/frame')).length
+  expect(framesAfter, 'refresh tick captured a frame').toBeGreaterThan(framesBefore)
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'still image mode').toBeDefined()
+
+  // The same button returns to the editable text tier and stops the clock.
+  await ui.press({ key: 'hq' })
+  expect(await ui.find({ type: 'Image', key: 'frame' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('hq is hidden and explained on Windows Terminal', async ($, on) => {
+  installBottom(on, { env: { WT_SESSION: 'session-1' } })
+  load(on)
+  await start($)
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  expect(await ui.find({ type: 'Button', key: 'hq' }), 'no hq button').toBeUndefined()
+  const notice = await ui.find({ type: 'Text', text: /hq unavailable/ })
+  expect(notice, 'reason notice').toBeDefined()
+  expect(notice?.text ?? '').toContain('Windows Terminal')
+  await ui.unmount()
+})

@@ -76,6 +76,18 @@ export type ActResult = {
   url?: string
 }
 
+export type Frame = {
+  /** Absolute path of a PNG the terminal reads itself. */
+  file: string
+  /** Increases with every capture; the same path may hold new bytes. */
+  generation: number
+  columns: number
+  rows: number
+  /** The capture's CSS pixel size (the terminal scales it to the cell box). */
+  pageWidth: number
+  pageHeight: number
+}
+
 export type ActContext = {
   actor: 'person' | 'model'
   signal?: AbortSignal
@@ -98,4 +110,6 @@ export type Provider = {
   act(action: Action, context: ActContext): Promise<ActResult>
   screenshot(cols: number, rows: number): Promise<{ pngBase64: string; cols: number; rows: number }>
   raster(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
+  /** A real-pixel PNG on disk, for terminals that can draw a file source. */
+  frame?(cols: number, rows: number): Promise<Frame>
 }

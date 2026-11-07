@@ -6,7 +6,7 @@
 // Bind is 127.0.0.1 only; no Origin is accepted over the network.
 
 import { createServer } from 'node:http'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -39,12 +39,20 @@ let currentTitle = ''
 let navigations = 0
 let lastActivity = Date.now()
 let browserProduct = 'unknown'
+// HQ frames are files the terminal reads itself: no byte payload crosses the
+// plugin, and the terminal decodes the PNG at native density. At most ten are
+// kept so a once-a-second refresh cannot fill the temp dir.
+let frameDir
+let frameGeneration = 0
+const frameFiles = []
+const FRAME_LIMIT = 10
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function launch() {
   const exe = findBrowser()
   profileDir = mkdtempSync(join(tmpdir(), 'transom-profile-'))
+  frameDir = mkdtempSync(join(tmpdir(), 'transom-frame-'))
   const args = [
     '--headless=new',
     '--remote-debugging-port=0',
@@ -386,6 +394,44 @@ async function shot(request) {
   }
 }
 
+// A frame for the pane's image tier: the same device metrics as /shot, but
+// written to a private PNG file and addressed by path, so the terminal reads
+// exactly this capture.
+async function frame(request) {
+  const columns = Math.max(20, Math.min(Number(request.cols) || VIEW_COLS, 200))
+  const rows = Math.max(5, Math.min(Number(request.rows) || VIEW_ROWS, 120))
+  const pageWidth = Math.min(columns * CELL_W, 2000)
+  const pageHeight = Math.min(rows * CELL_H, 1200)
+  await cmd('Emulation.setDeviceMetricsOverride', {
+    width: pageWidth,
+    height: pageHeight,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
+  try {
+    const captured = await cmd('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: false,
+      fromSurface: true,
+    })
+    frameGeneration += 1
+    const file = join(frameDir, `f${frameGeneration}.png`)
+    writeFileSync(file, Buffer.from(captured.data, 'base64'))
+    frameFiles.push(file)
+    while (frameFiles.length > FRAME_LIMIT) {
+      const old = frameFiles.shift()
+      try {
+        unlinkSync(old)
+      } catch {
+        /* already gone */
+      }
+    }
+    return { file, generation: frameGeneration, columns, rows, pageWidth, pageHeight }
+  } finally {
+    await restoreMetrics()
+  }
+}
+
 function send(res, status, body) {
   const text = JSON.stringify(body)
   res.writeHead(status, {
@@ -419,6 +465,7 @@ const ROUTES = {
   },
   'POST /shot': async body => await shot(body),
   'POST /raster': async body => await raster(body),
+  'POST /frame': async body => await frame(body),
   'POST /stop': async () => {
     void shutdown(0)
     return { ok: true }
@@ -465,6 +512,16 @@ const server = createServer(async (req, res) => {
 async function shutdown(code) {
   if (stopping) return
   stopping = true
+  // Frames are ours alone: drop them now, so a SIGTERM right after /stop
+  // cannot leave a temp dir behind. The Chrome profile waits for the child.
+  if (frameDir) {
+    try {
+      rmSync(frameDir, { recursive: true, force: true, maxRetries: 2 })
+    } catch {
+      /* already gone */
+    }
+    frameDir = undefined
+  }
   try {
     if (cdp && !cdp.isClosed) await cdp.send('Browser.close', {}, undefined, 3000).catch(() => {})
   } catch {

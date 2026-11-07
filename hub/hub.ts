@@ -33,7 +33,7 @@ export type ViewModel = {
   last?: string
   audit: string[]
   scope: 'viewport' | 'document'
-  mode: 'text' | 'visual'
+  mode: 'text' | 'visual' | 'image'
 }
 
 export const EMPTY_VIEW: ViewModel = {

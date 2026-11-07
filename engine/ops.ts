@@ -19,4 +19,11 @@ export type Ops = {
   after: (ms: number, fn: () => void) => Timer
   openPane: (args: PaneOpenArgs) => Promise<UiOpenResult>
   closePane: (id: string) => Promise<void>
+  /** Terminal identity for image-tier detection; names are spelled at the call site. */
+  env: {
+    term: () => Promise<string | undefined>
+    termProgram: () => Promise<string | undefined>
+    wtSession: () => Promise<string | undefined>
+    tmux: () => Promise<string | undefined>
+  }
 }

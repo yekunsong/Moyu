@@ -2,6 +2,8 @@ import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 import { startDemo } from '../../demo/server.mjs'
 
@@ -202,6 +204,41 @@ test('screenshot returns a PNG', async () => {
   assert.equal(status, 200)
   const bytes = Buffer.from(body.pngBase64, 'base64')
   assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
+})
+
+test('frame writes a real PNG file and prunes old generations', async () => {
+  await json('/navigate', { url: demo.url })
+  const first = await json('/frame', { cols: 40, rows: 12 })
+  assert.equal(first.status, 200)
+  assert.deepEqual(
+    { columns: first.body.columns, rows: first.body.rows, pageWidth: first.body.pageWidth, pageHeight: first.body.pageHeight },
+    { columns: 40, rows: 12, pageWidth: 320, pageHeight: 192 },
+  )
+  assert.ok(existsSync(first.body.file), 'the frame file exists')
+  const bytes = readFileSync(first.body.file)
+  assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], 'PNG signature')
+
+  const second = await json('/frame', { cols: 40, rows: 12 })
+  assert.ok(second.body.generation > first.body.generation, 'generation increases')
+
+  // Ten more captures prune the earliest file and keep at most ten.
+  for (let i = 0; i < 10; i += 1) await json('/frame', { cols: 20, rows: 5 })
+  const files = readdirSync(dirname(first.body.file)).filter(name => name.endsWith('.png'))
+  assert.ok(files.length <= 10, `at most ten frames, saw ${files.length}`)
+  assert.equal(existsSync(first.body.file), false, 'the oldest frame was pruned')
+})
+
+test('frame clamps the requested cell box and caps the pixel size', async () => {
+  const tiny = await json('/frame', { cols: 2, rows: 1 })
+  assert.equal(tiny.body.columns, 20)
+  assert.equal(tiny.body.rows, 5)
+
+  const big = await json('/frame', { cols: 400, rows: 400 })
+  assert.equal(big.body.columns, 200)
+  assert.equal(big.body.rows, 120)
+  assert.ok(big.body.pageWidth <= 2000)
+  assert.ok(big.body.pageHeight <= 1200)
+  assert.equal(existsSync(big.body.file), true)
 })
 
 test('refs do not rebind to elements on a new page', async () => {

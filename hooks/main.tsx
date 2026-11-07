@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Ops } from '../engine/ops'
 import { EMPTY_VIEW, Hub, normaliseKey, type ViewModel, type ViewRow } from '../hub/hub'
-import { negotiate } from '../hub/negotiate'
+import { detectImageTier, negotiate, type ImageTier } from '../hub/negotiate'
+import type { Frame } from '../providers/browser/contract'
 import { glyphFor, pressRow } from '../providers/browser/rows'
 import { registerToolSpecs, registerTools } from './tools'
 
@@ -18,6 +19,23 @@ let lastShot: { key: string; cells: string; columns: number; rows: number; url: 
   rows: 0,
   url: '',
 }
+
+// The HQ image tier: a file path the terminal reads itself, refreshed about
+// once a second while the pane is in image mode. Like lastShot, it lives in a
+// module variable rather than state: a reload drops it and the pane falls back
+// to text.
+let lastFrame: { file: string; generation: number; columns: number; rows: number; url: string } = {
+  file: '',
+  generation: 0,
+  columns: 0,
+  rows: 0,
+  url: '',
+}
+let imageTier: ImageTier = { supported: false, reason: '' }
+let frameTimer: Timer | undefined
+let frameBusy = false
+let frameActive = false
+let frameSize = { columns: 0, rows: 0 }
 
 let hub: Hub | undefined
 let demo: { url: string } | undefined
@@ -63,24 +81,6 @@ function statusLine(model: ViewModel, shown: number, width: number): string {
   return clip(`${model.mode} · ${shown}/${model.rows.length} shown · ${model.audit[0] ?? 'no actions yet'}`, width)
 }
 
-function makeOps($: EngineInterface): Ops {
-  return {
-    root: $.plugin.root,
-    ask: (question, options) => $.ui.ask(question, options),
-    log: text => $.ui.log(text),
-    status: text => $.ui.status(text),
-    toast: text => $.ui.toast(text),
-    fetch: (url, init) => $.http.fetch(url, init),
-    spawn: request => $.process.spawn(request),
-    storeGet: key => $.store.get(key),
-    storeSet: (key, value) => $.store.set(key, value),
-    every: (ms, fn) => $.clock.every(ms, fn),
-    after: (ms, fn) => $.clock.after(ms, fn),
-    openPane: args => $.ui.open(args),
-    closePane: id => $.ui.close({ id }),
-  }
-}
-
 function ensureHub(ops: Ops, options: Record<string, unknown>, refresh: () => void): Hub {
   if (!hub) {
     hub = new Hub(ops, options)
@@ -112,18 +112,31 @@ export const register: Register = (on, options) => {
       after: (ms, fn) => $.clock.after(ms, fn),
       openPane: args => $.ui.open(args),
       closePane: id => $.ui.close({ id }),
+      env: {
+        term: () => $.env.get('TERM'),
+        termProgram: () => $.env.get('TERM_PROGRAM'),
+        wtSession: () => $.env.get('WT_SESSION'),
+        tmux: () => $.env.get('TMUX'),
+      },
     }
     ensureHub(ops, options as Record<string, unknown>, () => {
       void update($, view, () => hub!.view)
     })
+    try {
+      imageTier = await detectImageTier(ops)
+    } catch {
+      imageTier = { supported: false, reason: 'terminal detection failed' }
+    }
+    stopFrames()
+    lastFrame = { file: '', generation: 0, columns: 0, rows: 0, url: '' }
     void hub!.provider.start().catch(error => {
       ops.log(`bridge start: ${String((error as Error).message ?? error)}`)
     })
     await registerToolSpecs($)
     await $.command.register({
       name: 'transom',
-      description: 'Transom pane: open a URL, run the demo, inspect the audit, close',
-      argumentHint: 'open <url> | demo | audit | close',
+      description: 'Transom pane: open a URL, run the demo, inspect the audit, switch to hq, close',
+      argumentHint: 'open <url> | demo | audit | hq | close',
     })
     await update($, view, () => EMPTY_VIEW)
     lastShot = { key: '', cells: '', columns: 0, rows: 0, url: '' }
@@ -145,6 +158,12 @@ export const register: Register = (on, options) => {
       after: (ms, fn) => $.clock.after(ms, fn),
       openPane: args => $.ui.open(args),
       closePane: id => $.ui.close({ id }),
+      env: {
+        term: () => $.env.get('TERM'),
+        termProgram: () => $.env.get('TERM_PROGRAM'),
+        wtSession: () => $.env.get('WT_SESSION'),
+        tmux: () => $.env.get('TMUX'),
+      },
     }
     const transom = ensureHub(ops, options as Record<string, unknown>, () => {
       void update($, view, () => hub!.view)
@@ -165,10 +184,29 @@ export const register: Register = (on, options) => {
     }
 
     if (verb === 'close') {
+      stopFrames()
+      lastFrame = { file: '', generation: 0, columns: 0, rows: 0, url: '' }
       await transom.close()
       await ops.closePane(PANE)
       stopDemo()
       return { text: 'Transom closed.' }
+    }
+
+    if (verb === 'hq') {
+      // Re-check here as well: the terminal may have changed (a new tab, tmux).
+      try {
+        imageTier = await detectImageTier(ops)
+      } catch {
+        imageTier = { supported: false, reason: 'terminal detection failed' }
+      }
+      if (!imageTier.supported) return { text: `hq unavailable: ${imageTier.reason}` }
+      await showPane(ops)
+      const started = await startImage($, ops, transom, transom.provider.meta.defaultWidth, 24)
+      return {
+        text: started
+          ? 'hq on: the pane shows the real page, read-only. /transom hq again or text mode to edit.'
+          : 'hq could not capture a frame; the pane stays in text mode.',
+      }
     }
 
     if (verb === 'audit') {
@@ -199,7 +237,7 @@ export const register: Register = (on, options) => {
       return { text: opened.ok ? `opened ${transom.view.url}` : opened.message }
     }
 
-    return { text: 'usage: /transom open <url> | demo | audit | close' }
+    return { text: 'usage: /transom open <url> | demo | audit | hq | close' }
   })
 
   on('ui.message', { requestId: PANE }, async ($, e) => {
@@ -217,6 +255,12 @@ export const register: Register = (on, options) => {
       after: (ms, fn) => $.clock.after(ms, fn),
       openPane: args => $.ui.open(args),
       closePane: id => $.ui.close({ id }),
+      env: {
+        term: () => $.env.get('TERM'),
+        termProgram: () => $.env.get('TERM_PROGRAM'),
+        wtSession: () => $.env.get('WT_SESSION'),
+        tmux: () => $.env.get('TMUX'),
+      },
     }
     const data = e.data as { kind?: string; key?: string }
     if (data.kind === 'key' && data.key) {
@@ -229,7 +273,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE, surface: 'terminal' }, async ($, e) => {
-    const { Box, Text, Button, Input, Select, Client, Raster } = $.ui.resolve(e)
+    const { Box, Text, Button, Input, Select, Client, Raster, Image } = $.ui.resolve(e)
     const ops: Ops = {
       root: $.plugin.root,
       ask: (question, options) => $.ui.ask(question, options),
@@ -244,6 +288,12 @@ export const register: Register = (on, options) => {
       after: (ms, fn) => $.clock.after(ms, fn),
       openPane: args => $.ui.open(args),
       closePane: id => $.ui.close({ id }),
+      env: {
+        term: () => $.env.get('TERM'),
+        termProgram: () => $.env.get('TERM_PROGRAM'),
+        wtSession: () => $.env.get('WT_SESSION'),
+        tmux: () => $.env.get('TMUX'),
+      },
     }
     const transom = ensureHub(ops, options as Record<string, unknown>, () => {
       void update($, view, () => hub!.view)
@@ -262,6 +312,9 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         <Text bold>Transom · {model.title || 'no page'}</Text>
         <Text dimColor>{model.url || 'open a URL with /transom open <url> · local hosts only by default'}</Text>
+        {!imageTier.supported && imageTier.reason && model.rows.length === 0 ? (
+          <Text dimColor>hq unavailable: {imageTier.reason}</Text>
+        ) : null}
         {e.props.placement === 'inline' ? (
           <Text dimColor>mouse needs fullscreen: CLAUDE_CODE_NO_FLICKER=1 · keyboard: ctrl+x tab</Text>
         ) : null}
@@ -301,6 +354,11 @@ export const register: Register = (on, options) => {
         <Button key="visual" plain onPress={() => showVisual($, ops, transom, width, rows, model.mode)}>
           <Text dimColor>{model.mode === 'visual' ? 'text mode' : 'visual'}</Text>
         </Button>
+        {imageTier.supported ? (
+          <Button key="hq" plain onPress={() => void toggleImage($, ops, transom, width, rows, model.mode)}>
+            <Text dimColor>{model.mode === 'image' ? 'text mode' : 'hq'}</Text>
+          </Button>
+        ) : null}
       </Box>
     )
 
@@ -347,6 +405,26 @@ export const register: Register = (on, options) => {
           {header}
           {toolbar}
           <Raster key="shot" columns={rasterCols} rows={rasterRows} cells={shot.cells} />
+          <Text key="status" dimColor>{statusLine(model, model.rows.length, width)}</Text>
+          <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
+        </Box>
+      )
+    }
+
+    if (model.mode === 'image' && lastFrame.file) {
+      const frameRows = Math.max(5, rows - 9)
+      return (
+        <Box flexDirection="column" width="100%">
+          {header}
+          {toolbar}
+          <Image
+            key="frame"
+            source={{ file: lastFrame.file, format: 'png', generation: lastFrame.generation }}
+            columns={width}
+            rows={frameRows}
+            alt="page screenshot"
+          />
+          <Text dimColor>read-only · switch to text to edit</Text>
           <Text key="status" dimColor>{statusLine(model, model.rows.length, width)}</Text>
           <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
         </Box>
@@ -425,6 +503,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.close', { id: PANE }, async (_$, e, next) => {
+    stopFrames()
     if (hub) await hub.close()
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -432,6 +511,7 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     // The end-of-session budget is short; fire and let the bridge's own
     // /stop and idle shutdown do the cleanup if this does not land.
+    stopFrames()
     if (hub) void hub.close()
     stopDemo()
     return next(e)
@@ -444,9 +524,11 @@ async function showVisual(
   transom: Hub,
   width: number,
   rows: number,
-  mode: 'text' | 'visual',
+  mode: 'text' | 'visual' | 'image',
 ): Promise<void> {
-  if (mode === 'visual') {
+  // From visual or image, any mode button returns to the editable text tier.
+  if (mode !== 'text') {
+    stopFrames()
     await update($, view, model => ({ ...model, mode: 'text' as const }))
     void $.ui.invalidate('ui.render')
     return
@@ -460,6 +542,112 @@ async function showVisual(
     void $.ui.invalidate('ui.render')
   } catch (error) {
     ops.toast(`visual: ${String((error as Error).message ?? error)}`)
+  }
+}
+
+function stopFrames(): void {
+  frameActive = false
+  frameTimer?.cancel()
+  frameTimer = undefined
+  frameBusy = false
+}
+
+async function toggleImage(
+  $: EngineInterface,
+  ops: Ops,
+  transom: Hub,
+  width: number,
+  rows: number,
+  mode: 'text' | 'visual' | 'image',
+): Promise<void> {
+  if (mode === 'image') {
+    stopFrames()
+    await update($, view, model => ({ ...model, mode: 'text' as const }))
+    void $.ui.invalidate('ui.render')
+    return
+  }
+  await startImage($, ops, transom, width, rows)
+}
+
+/**
+ * Enter the image tier: one frame now, then one per second while the mode is
+ * image. The timer's `$` is this call site's, so no module ever receives `$`.
+ */
+async function startImage(
+  $: EngineInterface,
+  ops: Ops,
+  transom: Hub,
+  width: number,
+  rows: number,
+): Promise<boolean> {
+  stopFrames()
+  const provider = transom.provider
+  if (!provider.frame) {
+    ops.toast('hq: this provider has no frame capture')
+    return false
+  }
+  frameSize = {
+    columns: Math.max(1, Math.floor(width)),
+    rows: Math.max(5, Math.floor(rows) - 9),
+  }
+  let frame: Frame
+  try {
+    frame = await provider.frame(frameSize.columns, frameSize.rows)
+  } catch (error) {
+    ops.toast(`hq: ${String((error as Error).message ?? error)}`)
+    await update($, view, model => ({ ...model, mode: 'text' as const }))
+    void $.ui.invalidate('ui.render')
+    return false
+  }
+  lastFrame = {
+    file: frame.file,
+    generation: frame.generation,
+    columns: frame.columns,
+    rows: frame.rows,
+    url: transom.view.url,
+  }
+  frameActive = true
+  await update($, view, model => ({
+    ...model,
+    mode: 'image' as const,
+    last: `image ${frame.columns}x${frame.rows}`,
+  }))
+  void $.ui.invalidate('ui.render')
+  // The mode lives in engine state, not in Hub.view; `frameActive` is the
+  // module-level truth the clock reads, so it stops on every exit path.
+  frameTimer = ops.every(1000, () => {
+    if (!frameActive) {
+      stopFrames()
+      return
+    }
+    void refreshFrame($, ops, transom)
+  })
+  return true
+}
+
+async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise<void> {
+  if (frameBusy) return
+  const provider = transom.provider
+  if (!provider.frame) return
+  frameBusy = true
+  try {
+    const frame = await provider.frame(frameSize.columns, frameSize.rows)
+    lastFrame = {
+      file: frame.file,
+      generation: frame.generation,
+      columns: frame.columns,
+      rows: frame.rows,
+      url: transom.view.url,
+    }
+    void $.ui.invalidate('ui.render')
+  } catch (error) {
+    // One toast, then leave image mode: the text tier stays usable.
+    stopFrames()
+    ops.toast(`hq: ${String((error as Error).message ?? error)}`)
+    await update($, view, model => ({ ...model, mode: 'text' as const }))
+    void $.ui.invalidate('ui.render')
+  } finally {
+    frameBusy = false
   }
 }
 

@@ -28,7 +28,12 @@ export type Bottom = {
   readState: (key: string) => unknown
 }
 
-export function installBottom(on: On): Bottom {
+export type BottomOptions = {
+  /** The terminal identity `$.env.get` answers; a name omitted is unset. */
+  env?: Readonly<Record<string, string>>
+}
+
+export function installBottom(on: On, options: BottomOptions = {}): Bottom {
   const page: FakePage = {
     url: 'http://127.0.0.1:1/',
     title: 'Demo page',
@@ -46,6 +51,8 @@ export function installBottom(on: On): Bottom {
   const clock = mock.clock(on)
   const bottomRef: { failHealth: boolean } = { failHealth: false }
   mock.store(on)
+  mock.env(on, options.env ?? {})
+  let frameGeneration = 0
   const states = new Map<string, { value: unknown; version: number }>()
 
   const value = <T,>(v: T) => ({ value: v }) as never
@@ -104,6 +111,26 @@ export function installBottom(on: On): Bottom {
       let binary = ''
       for (const byte of bytes) binary += String.fromCharCode(byte)
       return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ cells: btoa(binary), columns, rows }) })
+    }
+    if (path === '/frame') {
+      // The render uses a file source, which the kit cannot create. The path
+      // does not need to exist for the tree assertion; see the pane test.
+      const columns = Math.max(20, Math.min(Number(body.cols) || 20, 200))
+      const rows = Math.max(5, Math.min(Number(body.rows) || 5, 120))
+      frameGeneration += 1
+      return value({
+        status: 200,
+        ok: true,
+        headers: {},
+        text: JSON.stringify({
+          file: '/tmp/transom-test-frame.png',
+          generation: frameGeneration,
+          columns,
+          rows,
+          pageWidth: columns * 8,
+          pageHeight: rows * 16,
+        }),
+      })
     }
     if (path === '/snapshot') {
       const text = JSON.stringify({

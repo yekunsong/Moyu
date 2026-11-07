@@ -144,7 +144,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 - Clicking a row executes immediately (a person can see the page). Model writes are confirmed according to `writePolicy`.
 - Text fields and selects are edited inline: type and press Enter, or pick an option; no dialog.
 - Rows are grouped under page headings with a fixed status bar; `↓ next block` scrolls the page when the snapshot is longer than the pane.
-- `visual` switches to the colored-cell tier; press again to return to text.
+- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm), refreshed about once a second; both return to text with another press.
 - Click the keyboard strip to forward keys to the page; Esc returns them to the prompt.
 - Panes narrower than 48 columns show a degradation notice.
 
@@ -255,7 +255,7 @@ Measured on Claude Code 2.1.319, local, interactive terminal.
 |---|---|---|---|
 | Text | Text, links, form structure, colored | Low | Shipped |
 | Colored cells | Raster downscale, 24-bit color, clickable by row | Medium | Shipped (`visual`) |
-| Images | Terminal image protocol, some terminals only | High | Not implemented |
+| Images (HQ) | `Image` with a PNG file source; kitty, Ghostty, WezTerm | Medium | Shipped (`hq`), ~1 fps |
 
 The color is real 24-bit foreground/background, not monochrome. Cells are still an image, not the thing itself: small type blurs and rounded shadows disappear.
 
@@ -265,7 +265,8 @@ The color is real 24-bit foreground/background, not monochrome. Cells are still 
 - **Interactive only:** desktop app, mobile and headless sessions do not draw the pane.
 - **Headless Chrome only:** no logged-in profile by default; no extensions, no audio, no tabs.
 - **No JS-rendered canvas semantics:** canvas content participates as an image, not as nodes.
-- **Raster is manual:** `visual` repaints on demand; no dirty-rectangle continuous streaming yet.
+- **Raster is manual:** `visual` repaints on demand; `hq` refreshes at ~1 fps. No dirty-rectangle streaming yet.
+- **HQ terminals:** `hq` needs a terminal that reads a PNG path itself (kitty, Ghostty, WezTerm); iTerm2, tmux and Windows Terminal stay on the text tier.
 
 ## Development
 
