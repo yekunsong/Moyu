@@ -37,6 +37,9 @@
     <output id="count" role="status" aria-live="polite">0</output>
     <button id="inc" class="primary" aria-label="Increase count">+</button>
     <span id="status"></span>
+    <button id="alert" aria-label="Show alert">Show alert</button>
+    <button id="later" aria-label="Append later">Append later</button>
+    <span id="later-host"></span>
   </div>
 
   <h2>Form</h2>
@@ -96,6 +99,16 @@
     const render = () => { countEl.textContent = String(count) }
     document.getElementById('inc').onclick = () => { count += 1; render(); statusEl.textContent = 'increased' }
     document.getElementById('dec').onclick = () => { count -= 1; render(); statusEl.textContent = 'decreased' }
+
+    document.getElementById('alert').addEventListener('click', () => alert('demo alert'))
+    document.getElementById('later').addEventListener('click', () => {
+      setTimeout(() => {
+        const node = document.createElement('p')
+        node.id = 'later-node'
+        node.textContent = 'later'
+        document.getElementById('later-host').append(node)
+      }, 400)
+    })
 
     document.getElementById('signup').addEventListener('submit', event => {
       event.preventDefault()

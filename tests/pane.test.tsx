@@ -395,3 +395,77 @@ test('hq is hidden and explained on Windows Terminal', async ($, on) => {
   expect(notice?.text ?? '').toContain('Windows Terminal')
   await ui.unmount()
 })
+
+test('browser_find returns matching refs without a refresh', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+  const snapshotsBefore = bottom.fetches.filter(one => one.endsWith('/snapshot')).length
+
+  const found = await tool($, 'browser_find', { text: 'increase' })
+  expect(found.text ?? '').toContain('[t1] button "Increase count"')
+  expect(found.text ?? '').toContain('1 matches of')
+
+  // It reads the existing snapshot: no extra /snapshot request.
+  expect(bottom.fetches.filter(one => one.endsWith('/snapshot')).length).toBe(snapshotsBefore)
+
+  const buttons = await tool($, 'browser_find', { role: 'button', interactiveOnly: true })
+  expect(buttons.text ?? '').toContain('[t1]')
+  expect(buttons.text ?? '').not.toContain('[t2]')
+
+  const none = await tool($, 'browser_find', { text: 'zzz-not-here' })
+  expect(none.text ?? '').toContain('no matches')
+})
+
+test('browser_snapshot sinceLast reports a per-ref diff', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const unchanged = await tool($, 'browser_snapshot', { sinceLast: true })
+  expect(unchanged.text ?? '').toContain('no changes since the last snapshot')
+
+  // The fake page changes underneath without the hub refreshing its view.
+  bottom.page.count = 1
+  const changed = await tool($, 'browser_snapshot', { sinceLast: true })
+  expect(changed.text ?? '').toContain('0 added, 0 removed, 1 changed')
+  expect(changed.text ?? '').toContain('~ [t3] text "count 0" -> "count 1"')
+  expect(changed.text ?? '').not.toContain('# PAGE CONTENT BELOW')
+
+  bottom.page.fills['t2'] = 'a@b.c'
+  const filled = await tool($, 'browser_snapshot', { sinceLast: true })
+  expect(filled.text ?? '').toContain('0 added, 0 removed, 1 changed')
+  expect(filled.text ?? '').toContain('~ [t2] textbox value:')
+  expect(filled.text ?? '').toContain('a@b.c')
+
+  // Without sinceLast the full snapshot is unchanged in shape.
+  const full = await tool($, 'browser_snapshot', {})
+  expect(full.text ?? '').toContain('# PAGE CONTENT BELOW')
+  expect(full.text ?? '').toContain('count 1')
+})
+
+test('browser_wait maps to a read-only wait action', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const waited = await tool($, 'browser_wait', { selector: '#count', timeoutMs: 1000 })
+  expect(waited.text ?? '').toContain('ok')
+  expect(waited.text ?? '').toContain('found selector #count')
+  const call = bottom.page.waitCalls.at(-1)
+  expect(call?.kind, 'fake bridge saw kind wait').toBe('wait')
+  expect(call?.selector).toBe('#count')
+  expect(call?.timeoutMs).toBe(1000)
+  // A wait is a read: no confirmation prompt.
+  expect(bottom.asks.length).toBe(0)
+
+  const idle = await tool($, 'browser_wait', { idleMs: 250 })
+  expect(idle.text ?? '').toContain('ok')
+  expect(bottom.page.waitCalls.at(-1)?.idleMs).toBe(250)
+
+  const missing = await tool($, 'browser_wait', {})
+  expect(missing.text ?? '').toContain('wait requires at least one of selector, text or idleMs')
+})

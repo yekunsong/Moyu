@@ -51,8 +51,35 @@ let frameDir
 let frameGeneration = 0
 const frameFiles = []
 const FRAME_LIMIT = 10
+// The most recent JavaScript dialog. The default policy is to accept alerts and
+// dismiss confirm/prompt immediately, so a dialog never blocks the page.
+let lastDialog = null
+// Network tracking starts lazily on the first wait with idleMs; until then no
+// Network domain events are delivered.
+let networkTracking = false
+let inFlight = 0
+let networkQuietAt = Date.now()
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+function sanitizeText(value, limit = 120) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, limit)
+}
+
+// Default dialog policy: alert is accepted, confirm/prompt are dismissed.
+// Whatever the type, it is answered here so the page is never left blocked.
+function handleDialog(params, sid) {
+  if (sid !== undefined && sid !== sessionId) return
+  const type = sanitizeText(params?.type, 40) || 'unknown'
+  const message = sanitizeText(params?.message, 120)
+  lastDialog = { type, message, at: Date.now() }
+  const accept = type === 'alert'
+  cmd('Page.handleJavaScriptDialog', { accept }).catch(() => {})
+}
 
 async function launch() {
   frameDir = mkdtempSync(join(tmpdir(), 'transom-frame-'))
@@ -139,6 +166,7 @@ async function launch() {
       navigations += 1
     }
   })
+  cdp.on('Page.javascriptDialogOpening', handleDialog)
   await evalInPage(INSTALL)
 }
 
@@ -185,6 +213,7 @@ async function launchAttached(port) {
       navigations += 1
     }
   })
+  cdp.on('Page.javascriptDialogOpening', handleDialog)
   await evalInPage(INSTALL)
   currentUrl = page?.url ?? 'about:blank'
   currentTitle = page?.title ?? ''
@@ -298,7 +327,99 @@ async function snapshot(request) {
   )
 }
 
-async function act(action) {
+// Page-side wait: polls every 100ms until the selector matches or the body
+// text appears, bounded by the (already clamped) timeout.
+const PAGE_WAIT = String.raw`
+(async spec => {
+  const started = performance.now()
+  const deadline = started + spec.timeoutMs
+  const description = spec.selector
+    ? 'selector ' + spec.selector
+    : 'text ' + JSON.stringify(spec.text)
+  let found = false
+  while (true) {
+    try {
+      if (spec.selector) found = !!document.querySelector(spec.selector)
+      else found = String(document.body ? document.body.innerText : '').includes(spec.text)
+    } catch {
+      found = false
+    }
+    if (found) break
+    if (performance.now() >= deadline) break
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  return { found, elapsedMs: Math.round(performance.now() - started), description }
+})
+`
+
+function clampTimeout(value, fallback = 5000) {
+  const ms = Number(value)
+  const wanted = Number.isFinite(ms) && ms > 0 ? ms : fallback
+  return Math.min(Math.max(wanted, 500), 10000)
+}
+
+// Enabled on demand: counting from Network events is only worth its overhead
+// when someone waits for idle.
+async function enableNetworkTracking() {
+  if (networkTracking) return
+  networkTracking = true
+  networkQuietAt = Date.now()
+  const note = sid => {
+    if (sid !== undefined && sid !== sessionId) return false
+    networkQuietAt = Date.now()
+    return true
+  }
+  cdp.on('Network.requestWillBeSent', (params, sid) => {
+    if (!note(sid)) return
+    inFlight += 1
+  })
+  cdp.on('Network.loadingFinished', (params, sid) => {
+    if (!note(sid)) return
+    inFlight = Math.max(0, inFlight - 1)
+  })
+  cdp.on('Network.loadingFailed', (params, sid) => {
+    if (!note(sid)) return
+    inFlight = Math.max(0, inFlight - 1)
+  })
+  await cmd('Network.enable')
+}
+
+async function waitNetworkIdle(timeoutMs, idleMs) {
+  await enableNetworkTracking()
+  const started = Date.now()
+  const idle = Math.max(100, Math.min(Number(idleMs) || 500, timeoutMs))
+  while (true) {
+    const elapsed = Date.now() - started
+    if (inFlight === 0 && Date.now() - networkQuietAt >= idle) {
+      return { ok: true, changed: false, message: `waited ${elapsed}ms: found network idle` }
+    }
+    if (elapsed >= timeoutMs) {
+      return { ok: false, changed: false, message: `waited ${elapsed}ms: lost network idle (${inFlight} in flight)` }
+    }
+    await sleep(Math.min(100, Math.max(20, timeoutMs - elapsed)))
+  }
+}
+
+async function actInner(action) {
+  if (action.kind === 'wait') {
+    const timeoutMs = clampTimeout(action.timeoutMs)
+    if (action.selector || action.text) {
+      const waited = await evalInPage(
+        `(${PAGE_WAIT})(${JSON.stringify({ selector: action.selector, text: action.text, timeoutMs })})`,
+      )
+      const description = sanitizeText(waited?.description, 160)
+      const elapsed = Math.round(Number(waited?.elapsedMs) || 0)
+      const found = !!waited?.found
+      return {
+        ok: found,
+        changed: false,
+        message: `waited ${elapsed}ms: ${found ? 'found' : 'lost'} ${description}`.trim(),
+      }
+    }
+    if (Number(action.idleMs) > 0) return await waitNetworkIdle(timeoutMs, action.idleMs)
+    // A timeout is a normal result, not an error; a missing condition is not.
+    return { ok: false, changed: false, message: 'wait requires selector, text or idleMs' }
+  }
   const simpleKinds = ['click', 'hover', 'fill', 'select', 'focus']
   if (simpleKinds.includes(action.kind)) {
     const result = await evalInPage(`(${ACT})(${JSON.stringify(action)})`)
@@ -392,6 +513,23 @@ async function act(action) {
   return { ok: false, changed: false, message: `unknown action ${action.kind}` }
 }
 
+// A dialog that was just answered is part of this action's story: a click that
+// opened an alert should say so in its audit message.
+const DIALOG_WINDOW_MS = 2000
+
+async function act(action) {
+  const result = await actInner(action)
+  if (
+    lastDialog &&
+    Date.now() - lastDialog.at <= DIALOG_WINDOW_MS &&
+    result &&
+    typeof result.message === 'string'
+  ) {
+    result.message = `${result.message} (dialog ${lastDialog.type}: ${lastDialog.message})`
+  }
+  return result
+}
+
 async function health() {
   const alive = !!cdp && !cdp.isClosed && (!owned || chrome?.exitCode === null)
   let title = currentTitle
@@ -411,6 +549,7 @@ async function health() {
     title,
     navigations,
     error: lastError,
+    lastDialog,
   }
 }
 

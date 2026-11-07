@@ -272,8 +272,8 @@ The queue is serial and carries `actor: 'person' | 'model'` on every action. Pro
 | Milestone | Content | Acceptance | Status |
 |---|---|---|---|
 | M0 probe | Minimal manifest, pane, Client pointer, child stdout plumbing | `validate` passes; pane clickable, coordinates reported | ✅ Done |
-| M1 contract and bridge | Provider contract, supervisor, bridge, CDP, snapshot/act, demo | Bridge E2E green: launch, snapshot, click, fill, scroll, navigate | ✅ Done (20 integration tests) |
-| M2 shared channel | Hub, permissions, audit, tool registration, pane interaction, focus | `claude plugin test` green; a model click and a person click produce the same audit shape | ✅ Done (31 tests) |
+| M1 contract and bridge | Provider contract, supervisor, bridge, CDP, snapshot/act, demo | Bridge E2E green: launch, snapshot, click, fill, scroll, navigate | ✅ Done (26 integration tests) |
+| M2 shared channel | Hub, permissions, audit, tool registration, pane interaction, focus | `claude plugin test` green; a model click and a person click produce the same audit shape | ✅ Done (34 tests) |
 | M3 visual tier | Raster downscale, dirty repaint, Image tier | Stable frame rate; ≤1 cell coordinate error | ✅ Half-block Raster and HQ file-image tier done; dirty repaint pending |
 | M4 degradation and crashes | Negotiation, error pane, backoff, process cleanup | Recovery after killing Chrome; summary line in narrow panes | ✅ Negotiation/restart/idle done; real kill smoke verified via tests |
 | M5 docs and packaging | SECURITY, PROVIDERS, marketplace, icon | Clean-folder install works; README install section accurate | ✅ Done; manual install smoke by the user |

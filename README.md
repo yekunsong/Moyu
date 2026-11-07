@@ -73,6 +73,7 @@ Moving the window into the terminal is a side effect. The product is **structure
 - **Audited.** Human and model actions land in the same ring buffer and in `$.store`; fill text is redacted.
 - **Two rendering tiers.** Text (buttons and rows, any terminal) and colored cells (half-block Raster, 24-bit color). Degrades to a summary line in narrow panes.
 - **Crash-isolated.** A supervised local bridge owns headless Chromium; health checks, backoff restarts, idle shutdown, and process-tree cleanup on close.
+- **Model ergonomics.** Delta snapshots, `browser_find`, `browser_wait`, and automatic dialog handling (alerts accepted; confirms/prompts dismissed).
 - **Untrusted page content is treated as data.** Snapshots start with an explicit banner; page strings are control-character-stripped before dialogs; clicks hit-test `elementFromPoint` and report covered targets.
 
 ## Status
@@ -143,7 +144,9 @@ The pane connects to the first tab (preferring an http/https page) and drives it
 | Tool | Access | Purpose |
 |---|---|---|
 | `mcp__transom__browser_open` | write (navigation) | Open the pane and navigate; unlisted hosts require confirmation |
-| `mcp__transom__browser_snapshot` | read | Structured page snapshot: URL, title, landmarks, ref-tagged nodes |
+| `mcp__transom__browser_snapshot` | read | Structured page snapshot; `sinceLast: true` returns only added/removed/changed refs |
+| `mcp__transom__browser_find` | read | Filter the current snapshot by text, role or interactivity without re-reading the page |
+| `mcp__transom__browser_wait` | read | Wait for a CSS selector, body text or network idle; a timeout is a normal result |
 | `mcp__transom__browser_act` | read/write | `click`, `clickAt` (viewport px), `fill`, `select`, `press`, `scroll`, `hover`, `focus`, `navigate`, `back`, `forward`, `reload` |
 | `mcp__transom__browser_screenshot` | read | Capture the viewport as a PNG for visual checks |
 | `mcp__transom__browser_audit` | read | Recent actions with actor and outcome |
@@ -280,6 +283,7 @@ The color is real 24-bit foreground/background, not monochrome. Cells are still 
 - **No JS-rendered canvas semantics:** canvas content participates as an image, not as nodes.
 - **Raster is manual:** `visual` repaints on demand; `hq` refreshes at ~1 fps. No dirty-rectangle streaming yet.
 - **HQ terminals:** `hq` needs a terminal that reads a PNG path itself (kitty, Ghostty, WezTerm); iTerm2, tmux and Windows Terminal stay on the text tier.
+- **Dialogs:** `alert` is accepted, `confirm`/`prompt` are dismissed so a page never blocks; the dialog is recorded in `/health` and the action message.
 
 ## Development
 

@@ -73,6 +73,7 @@ Transom 把外部应用压成一对接口——`snapshot()` 读结构化状态�
 - **全量审计。** 人与模型动作进同一环形缓冲并持久化到 `$.store`；填写内容脱敏。
 - **两档渲染。** 文本档（任何终端）与彩色格档（半格块 Raster，24 位色）；窄面板降级为摘要行。
 - **崩溃隔离。** 受监督的本地 bridge 独占无头 Chromium；健康检查、退避重启、空闲自停、关闭时清理进程树。
+- **模型端易用性。** 增量快照、`browser_find`、`browser_wait`，以及对话框自动处理（alert 接受；confirm/prompt 拒绝）。
 - **页面内容按不可信数据处理。** 快照带显式横幅；页面字符串在进对话框前剥掉控制字符；点击前做 `elementFromPoint` 命中测试，遮挡会报告 `covered`。
 
 ## 状态
@@ -143,7 +144,9 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 | 工具 | 权限 | 用途 |
 |---|---|---|
 | `mcp__transom__browser_open` | 写（导航） | 打开面板并导航；白名单外主机需确认 |
-| `mcp__transom__browser_snapshot` | 读 | 结构化快照：URL、标题、地标、带 ref 的节点 |
+| `mcp__transom__browser_snapshot` | 读 | 结构化快照；`sinceLast: true` 只回新增/移除/变化的 ref |
+| `mcp__transom__browser_find` | 读 | 在当前快照里按文本、role 或可交互性过滤，不重新读页面 |
+| `mcp__transom__browser_wait` | 读 | 等待 CSS selector、正文文本或网络空闲；超时是正常结果 |
 | `mcp__transom__browser_act` | 读/写 | `click`、`clickAt`（视口像素）、`fill`、`select`、`press`、`scroll`、`hover`、`focus`、`navigate`、`back`、`forward`、`reload` |
 | `mcp__transom__browser_screenshot` | 读 | 截取可见区 PNG，用于视觉检查 |
 | `mcp__transom__browser_audit` | 读 | 最近动作及其发起者与结果 |

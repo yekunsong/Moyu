@@ -16,6 +16,7 @@ export type FakePage = {
   selectCalls: Array<{ ref: string; value: string }>
   scrollCalls: Array<{ dx: number; dy: number }>
   clickAtCalls: Array<{ x: number; y: number }>
+  waitCalls: Array<{ kind: string; selector?: string; text?: string; idleMs?: number; timeoutMs?: number }>
 }
 
 export type Bottom = {
@@ -45,6 +46,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     selectCalls: [],
     scrollCalls: [],
     clickAtCalls: [],
+    waitCalls: [],
   }
   const asks: string[] = []
   const fetches: string[] = []
@@ -176,6 +178,22 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
       return value({ status: 200, ok: true, headers: {}, text })
     }
     if (path === '/act') {
+      if (body.kind === 'wait') {
+        page.waitCalls.push({
+          kind: 'wait',
+          selector: body.selector,
+          text: body.text,
+          idleMs: body.idleMs,
+          timeoutMs: body.timeoutMs,
+        })
+        const what = body.selector ? `selector ${body.selector}` : body.text ? `text ${JSON.stringify(body.text)}` : 'network idle'
+        return value({
+          status: 200,
+          ok: true,
+          headers: {},
+          text: JSON.stringify({ ok: true, changed: false, message: `waited 1ms: found ${what}` }),
+        })
+      }
       if (body.kind === 'click' && body.ref === 't1') page.count += 1
       if (body.kind === 'fill') {
         page.fills[body.ref] = body.text

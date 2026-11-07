@@ -269,6 +269,62 @@ test('frame clamps the requested cell box and caps the pixel size', async () => 
   assert.equal(existsSync(big.body.file), true)
 })
 
+test('a javascript alert is accepted, recorded and does not block the page', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  const alertButton = snap.nodes.find(node => node.name === 'Show alert')
+  assert.ok(alertButton, 'alert button present')
+
+  const clicked = await json('/act', { action: { kind: 'click', ref: alertButton.ref } })
+  assert.equal(clicked.body.ok, true)
+  assert.match(clicked.body.message, /dialog alert: demo alert/)
+
+  // If the dialog were still open, this evaluation and the health title read
+  // would hang or fail.
+  const after = await json('/snapshot', { maxChars: 50000 })
+  assert.equal(after.status, 200)
+  assert.match(after.body.title, /Transom demo/)
+
+  const health = (await json('/health')).body
+  assert.equal(health.lastDialog.type, 'alert')
+  assert.equal(health.lastDialog.message, 'demo alert')
+})
+
+test('wait finds an element that appears after a delay', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  const later = snap.nodes.find(node => node.name === 'Append later')
+  assert.ok(later, 'delayed button present')
+  const clicked = await json('/act', { action: { kind: 'click', ref: later.ref } })
+  assert.equal(clicked.body.ok, true)
+
+  const waited = await json('/act', { action: { kind: 'wait', selector: '#later-node', timeoutMs: 3000 } })
+  assert.equal(waited.status, 200)
+  assert.equal(waited.body.ok, true)
+  assert.equal(waited.body.changed, false)
+  assert.match(waited.body.message, /found selector #later-node/)
+})
+
+test('wait returns ok false on a normal timeout', async () => {
+  await json('/navigate', { url: demo.url })
+  const started = Date.now()
+  const waited = await json('/act', {
+    action: { kind: 'wait', text: 'this text never appears anywhere', timeoutMs: 600 },
+  })
+  assert.equal(waited.status, 200)
+  assert.equal(waited.body.ok, false)
+  assert.equal(waited.body.changed, false)
+  assert.match(waited.body.message, /lost|timeout/)
+  assert.ok(Date.now() - started < 2500, 'timeout is clamped and does not hang')
+})
+
+test('wait resolves immediately for a selector already present', async () => {
+  await json('/navigate', { url: demo.url })
+  const waited = await json('/act', { action: { kind: 'wait', selector: '#inc', timeoutMs: 5000 } })
+  assert.equal(waited.body.ok, true)
+  assert.match(waited.body.message, /waited \d+ms: found selector #inc/)
+})
+
 test('refs do not rebind to elements on a new page', async () => {
   await json('/navigate', { url: demo.url })
   const first = (await json('/snapshot', { maxChars: 80000 })).body

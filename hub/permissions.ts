@@ -40,7 +40,7 @@ export type Classification = {
   submits: boolean
 }
 
-const READ_KINDS = new Set(['scroll', 'hover', 'focus'])
+const READ_KINDS = new Set(['scroll', 'hover', 'focus', 'wait'])
 
 export function classify(action: Action): Classification {
   if (action.kind === 'navigate') return { level: 'navigate', submits: true }
@@ -132,6 +132,13 @@ export function describeAction(action: Action): string {
       return `scroll ${action.dx},${action.dy}`
     case 'navigate':
       return `navigate to ${action.url}`
+    case 'wait': {
+      const parts: string[] = []
+      if (action.selector) parts.push(`selector ${action.selector}`)
+      if (action.text) parts.push(`text "${action.text}"`)
+      if (action.idleMs) parts.push(`network idle ${action.idleMs}ms`)
+      return `wait ${parts.join(' or ') || 'for nothing'}`
+    }
     default:
       return action.kind
   }

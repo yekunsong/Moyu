@@ -39,6 +39,30 @@ const SNAPSHOT_SCHEMA = {
       enum: ['viewport', 'document'],
       description: 'viewport (default) is the visible region; document is the whole page, still capped.',
     },
+    sinceLast: {
+      type: 'boolean',
+      description:
+        'Only report what changed since the previous snapshot: added, removed and changed refs with counts. Falls back to the full snapshot when there is no baseline or the URL changed.',
+    },
+  },
+}
+
+const FIND_SCHEMA = {
+  type: 'object',
+  properties: {
+    text: { type: 'string', description: 'Case-insensitive match against node names and values.' },
+    role: { type: 'string', description: 'Exact role filter, e.g. button, link, textbox, heading.' },
+    interactiveOnly: { type: 'boolean', description: 'Only interactive nodes (buttons, inputs, links).' },
+  },
+}
+
+const WAIT_SCHEMA = {
+  type: 'object',
+  properties: {
+    selector: { type: 'string', description: 'CSS selector to wait for.' },
+    text: { type: 'string', description: 'Text that must appear in the page body.' },
+    timeoutMs: { type: 'number', description: 'Maximum wait in milliseconds, clamped to 500..10000 (default 5000).' },
+    idleMs: { type: 'number', description: 'Wait until no network request has been in flight for this many milliseconds.' },
   },
 }
 
@@ -47,17 +71,20 @@ const ACT_SCHEMA = {
   properties: {
     kind: {
       type: 'string',
-      enum: ['click', 'clickAt', 'fill', 'select', 'press', 'scroll', 'hover', 'focus', 'navigate', 'back', 'forward', 'reload'],
+      enum: ['click', 'clickAt', 'fill', 'select', 'press', 'scroll', 'hover', 'focus', 'navigate', 'back', 'forward', 'reload', 'wait'],
     },
     ref: { type: 'string', description: 'Node ref from the latest snapshot, e.g. "t12".' },
     x: { type: 'number', description: 'Viewport CSS pixel x for clickAt.' },
     y: { type: 'number', description: 'Viewport CSS pixel y for clickAt.' },
-    text: { type: 'string', description: 'Text for fill.' },
+    text: { type: 'string', description: 'Text for fill, or the body text to wait for with kind wait.' },
     value: { type: 'string', description: 'Option value for select.' },
     key: { type: 'string', description: 'Key for press: Enter, Tab, Escape, arrows, PageDown, or a character.' },
     dx: { type: 'number', description: 'Horizontal scroll wheel clicks for scroll.' },
     dy: { type: 'number', description: 'Vertical scroll wheel clicks for scroll.' },
     url: { type: 'string', description: 'Target for navigate.' },
+    selector: { type: 'string', description: 'CSS selector for kind wait.' },
+    timeoutMs: { type: 'number', description: 'Wait timeout for kind wait, clamped to 500..10000.' },
+    idleMs: { type: 'number', description: 'Network-idle window for kind wait.' },
   },
   required: ['kind'],
 }
@@ -73,8 +100,15 @@ export async function registerToolSpecs($: EngineInterface): Promise<void> {
     await $.tool.register({
       name: 'browser_snapshot',
       description:
-        'Return a structured snapshot of the page: URL, title, landmarks and ref-tagged nodes (role, name, value, state). Refs are valid until the next snapshot or navigation. Use viewport scope unless you need the whole page.',
+        'Return a structured snapshot of the page: URL, title, landmarks and ref-tagged nodes (role, name, value, state). Refs are valid until the next snapshot or navigation. Use viewport scope unless you need the whole page. Pass sinceLast: true to receive only added, removed and changed refs.',
       inputSchema: SNAPSHOT_SCHEMA,
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'browser_find',
+      description:
+        'Find nodes in the current snapshot without re-reading the page: filter by text (case-insensitive, matches names and values), exact role, and interactiveOnly. Returns snapshot-format lines with refs, capped at 40.',
+      inputSchema: FIND_SCHEMA,
       isDeferred: false,
     })
     await $.tool.register({
@@ -82,6 +116,13 @@ export async function registerToolSpecs($: EngineInterface): Promise<void> {
       description:
         'Perform one action on the page: click, clickAt, fill, select, press, scroll, hover, focus, navigate, back, forward, reload. clickAt uses viewport CSS pixels (x, y) instead of a ref. Returns the action result and an audit id. Retake the snapshot after stale-ref errors.',
       inputSchema: ACT_SCHEMA,
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'browser_wait',
+      description:
+        'Wait (read-only) for a CSS selector, for body text, or for network idle. Returns ok with what was found, or ok: false on timeout; a timeout is a normal result, not an error. Supply at least one of selector, text or idleMs.',
+      inputSchema: WAIT_SCHEMA,
       isDeferred: false,
     })
     await $.tool.register({
@@ -117,10 +158,33 @@ export function registerTools(on: On, deps: ToolDeps): void {
   }).catch(() => fail('transom: the tool failed internally'))
 
   on('tool.call', { tool: 'mcp__transom__browser_snapshot' }, async (_$, e) => {
-    const scope = (e as unknown as { scope?: 'viewport' | 'document' }).scope
+    const input = e as unknown as { scope?: 'viewport' | 'document'; sinceLast?: boolean }
     if (hub().view.status === 'closed') return fail('No page is open. Call browser_open first.')
-    const { text, auditId } = await hub().modelSnapshot(scope === 'document' ? 'document' : 'viewport')
+    const { text, auditId } = await hub().modelSnapshot(
+      input.scope === 'document' ? 'document' : 'viewport',
+      input.sinceLast === true,
+    )
     return answer(`${text}\n\naudit ${auditId}`)
+  }).catch(() => fail('transom: the tool failed internally'))
+
+  on('tool.call', { tool: 'mcp__transom__browser_find' }, async (_$, e) => {
+    const input = e as unknown as { text?: unknown; role?: unknown; interactiveOnly?: unknown }
+    if (hub().view.status === 'closed') return fail('No page is open. Call browser_open first.')
+    const { text, auditId } = await hub().modelFind({
+      text: typeof input.text === 'string' ? input.text : undefined,
+      role: typeof input.role === 'string' ? input.role : undefined,
+      interactiveOnly: input.interactiveOnly === true,
+    })
+    return answer(`${text}\n\naudit ${auditId}`)
+  }).catch(() => fail('transom: the tool failed internally'))
+
+  on('tool.call', { tool: 'mcp__transom__browser_wait' }, async (_$, e) => {
+    const action = toAction({ ...(e as unknown as Record<string, unknown>), kind: 'wait' })
+    if (typeof action === 'string') return fail(action)
+    if (hub().view.status === 'closed') return fail('No page is open. Call browser_open first.')
+    const { result, auditId, denied } = await hub().act(action, 'model')
+    const header = result.ok ? 'ok' : denied ? 'denied' : 'failed'
+    return answer(`${header}: ${result.message}\naudit ${auditId}`)
   }).catch(() => fail('transom: the tool failed internally'))
 
   on('tool.call', { tool: 'mcp__transom__browser_act' }, async (_$, e) => {
@@ -188,6 +252,23 @@ function toAction(input: Record<string, unknown>): Action | string {
       return { kind, dx: Number(input.dx) || 0, dy: Number(input.dy) || 0 }
     case 'navigate':
       return input.url ? { kind, url: String(input.url) } : 'url is required for navigate'
+    case 'wait': {
+      const selector = typeof input.selector === 'string' && input.selector ? input.selector : undefined
+      const text = typeof input.text === 'string' && input.text ? input.text : undefined
+      const idleMs = Number(input.idleMs)
+      const idle = Number.isFinite(idleMs) && idleMs > 0 ? idleMs : undefined
+      if (!selector && !text && idle === undefined) {
+        return 'wait requires at least one of selector, text or idleMs'
+      }
+      const timeoutMs = Number(input.timeoutMs)
+      return {
+        kind,
+        ...(selector ? { selector } : {}),
+        ...(text ? { text } : {}),
+        ...(idle !== undefined ? { idleMs: idle } : {}),
+        ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+      }
+    }
     case 'back':
     case 'forward':
     case 'reload':

@@ -8,7 +8,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Claude Code function-hooks mod with a docked/inline pane (`/transom`) and commands `open`, `demo`, `audit`, `close`.
 - Browser provider over the Chrome DevTools Protocol: structured snapshots (roles, accessible names, values, state, bounds, stable refs) and actions (`click`, `fill`, `select`, `press`, `scroll`, `hover`, `focus`, `navigate`, `back`, `forward`, `reload`, `clickAt`).
-- Five model tools: `browser_open`, `browser_snapshot`, `browser_act`, `browser_screenshot`, `browser_audit`.
+- Seven model tools: `browser_open`, `browser_snapshot` (with delta mode), `browser_find`, `browser_act`, `browser_wait`, `browser_screenshot`, `browser_audit`.
+- Automatic dialog handling: `alert` accepted, `confirm`/`prompt` dismissed, recorded in `/health` and action messages.
 - One serial action queue shared by people and the model, with per-action audit persisted across sessions.
 - Permission model: http(s)-only navigation, host allowlist with `localhost` always allowed, `confirm`/`once`/`auto` write policy, fail-closed confirmations.
 - Colored-cell visual tier (`Raster`, half-block, 24-bit color) and an HQ image tier (`Image`, real PNG frames at ~1 fps on kitty, Ghostty and WezTerm), with capability negotiation and a summary fallback.
@@ -17,7 +18,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Attach mode: `/transom attach <port>` mirrors and drives a Chrome the person started with `--remote-debugging-port`; closing detaches and leaves the browser running.
 - Snapshot hardening: document-generation refs, password masking, `elementFromPoint` hit tests, untrusted-content banner, control-character stripping.
 - Demo fixture (counter, form, list, canvas, shadow DOM, same-origin iframe, overlay, long scroller).
-- Test suites: 22 bridge/portability tests, 31 plugin/supervisor tests, `claude plugin validate` and `tsc` gates.
+- Test suites: 26 bridge/portability tests, 34 plugin/supervisor tests, `claude plugin validate` and `tsc` gates.
 - Documentation: README (English + Simplified Chinese), security model, provider guide, verified competitive landscape, implementation plan.
 
 ### Known limitations

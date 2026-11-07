@@ -64,6 +64,7 @@ export type Action =
   | { kind: 'press'; key: string; modifiers?: number }
   | { kind: 'scroll'; dx: number; dy: number }
   | { kind: 'clickAt'; x: number; y: number }
+  | { kind: 'wait'; selector?: string; text?: string; timeoutMs?: number; idleMs?: number }
   | { kind: 'navigate'; url: string }
   | { kind: 'back' }
   | { kind: 'forward' }
