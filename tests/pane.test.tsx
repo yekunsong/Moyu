@@ -252,3 +252,38 @@ test('inline textbox Input fills and combobox Select picks without a dialog', as
   expect(snap.text ?? '').toContain('frame.html')
   await ui.unmount()
 })
+
+test('sections, status bar and the next-block button render', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  const section = await ui.find({ type: 'Text', text: /COUNTER/ })
+  expect(section, 'section divider').toBeDefined()
+  expect(section?.text ?? '').toContain('COUNTER')
+  expect(section?.text ?? '').toContain('─')
+
+  const status = await ui.find({ type: 'Text', text: /shown/ })
+  expect(status, 'status bar').toBeDefined()
+  expect(status?.text ?? '').toContain('shown')
+  // A fresh page has no finished actions; an open in flight is an audit line.
+  expect(status?.text ?? '').toMatch(/no actions yet|open|you|model/)
+
+  const next = await ui.find({ type: 'Button', key: 'next' })
+  expect(next, 'next block button').toBeDefined()
+  expect(next?.text ?? '').toContain('next block')
+
+  await ui.press({ key: 'next' })
+  expect(bottom.page.scrollCalls.some(call => call.dy > 0), 'scroll recorded').toBe(true)
+  await ui.unmount()
+})

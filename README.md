@@ -143,6 +143,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 - **Mouse** requires the fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`); inline panes support keyboard focus only.
 - Clicking a row executes immediately (a person can see the page). Model writes are confirmed according to `writePolicy`.
 - Text fields and selects are edited inline: type and press Enter, or pick an option; no dialog.
+- Rows are grouped under page headings with a fixed status bar; `↓ next block` scrolls the page when the snapshot is longer than the pane.
 - `visual` switches to the colored-cell tier; press again to return to text.
 - Click the keyboard strip to forward keys to the page; Esc returns them to the prompt.
 - Panes narrower than 48 columns show a degradation notice.

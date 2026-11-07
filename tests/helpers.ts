@@ -14,6 +14,7 @@ export type FakePage = {
   selects: Record<string, string>
   fillCalls: Array<{ ref: string; text: string }>
   selectCalls: Array<{ ref: string; value: string }>
+  scrollCalls: Array<{ dx: number; dy: number }>
 }
 
 export type Bottom = {
@@ -36,6 +37,7 @@ export function installBottom(on: On): Bottom {
     selects: {},
     fillCalls: [],
     selectCalls: [],
+    scrollCalls: [],
   }
   const asks: string[] = []
   const fetches: string[] = []
@@ -111,6 +113,7 @@ export function installBottom(on: On): Bottom {
         viewport: { cols: 110, rows: 34, scrollX: 0, scrollY: 0, width: 880, height: 544, docWidth: 880, docHeight: 600 },
         landmarks: [{ role: 'heading', name: page.title }],
         nodes: [
+          { ref: 'h1', role: 'heading', name: 'COUNTER', depth: 0, bounds: { x: 0, y: 0, w: 10, h: 1 } },
           { ref: 't1', role: 'button', name: 'Increase count', depth: 1, interactive: true, bounds: { x: 0, y: 0, w: 10, h: 2 } },
           { ref: 't2', role: 'textbox', name: 'Email', depth: 1, interactive: true, value: page.fills['t2'] ?? '', invalid: true, bounds: { x: 0, y: 2, w: 10, h: 2 } },
           { ref: 't3', role: 'text', name: `count ${page.count}`, depth: 1, bounds: { x: 0, y: 4, w: 10, h: 1 } },
@@ -129,6 +132,15 @@ export function installBottom(on: On): Bottom {
             bounds: { x: 0, y: 5, w: 10, h: 2 },
           },
           { ref: 't5', role: 'link', name: 'Frame page', depth: 1, interactive: true, href: 'http://127.0.0.1:1/frame.html', bounds: { x: 0, y: 7, w: 10, h: 1 } },
+          // Enough filler to overflow the pane window, placed after the rows the
+          // existing tests reach for.
+          ...Array.from({ length: 30 }, (_, index) => ({
+            ref: `f${index + 1}`,
+            role: 'text',
+            name: `filler ${index + 1}`,
+            depth: 2,
+            bounds: { x: 0, y: 9 + index, w: 10, h: 1 },
+          })),
         ],
         truncated: { nodes: 0, chars: 0, scope: 'viewport' },
       })
@@ -144,6 +156,7 @@ export function installBottom(on: On): Bottom {
         page.selects[body.ref] = body.value
         page.selectCalls.push({ ref: body.ref, value: body.value })
       }
+      if (body.kind === 'scroll') page.scrollCalls.push({ dx: Number(body.dx) || 0, dy: Number(body.dy) || 0 })
       if (body.kind === 'navigate') page.url = body.url
       return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, changed: true, message: `did ${body.kind}` }) })
     }

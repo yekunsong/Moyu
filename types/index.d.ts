@@ -8,6 +8,10 @@ export type ViewRow = {
   invalid?: boolean
   flags?: string
   submits?: boolean
+  /** The section a row belongs to; a `role: 'section'` row is the heading itself. */
+  section?: string
+  /** Document depth, used for the pane's indent (capped when drawn). */
+  depth?: number
 }
 
 export type TransomView = {

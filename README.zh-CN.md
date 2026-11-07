@@ -143,6 +143,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 - **鼠标**需要全屏布局（`CLAUDE_CODE_NO_FLICKER=1`）；inline 面板只支持键盘焦点。
 - 点击一行立即执行（人看得到页面）。模型写操作按 `writePolicy` 确认。
 - 文本框与下拉框可直接在行内编辑：输入后回车，或选择选项，不再弹窗。
+- 行按页面标题分区，底部有固定状态栏；快照超长时用 `↓ next block` 翻页。
 - `visual` 切彩色格档；再按一次回文本档。
 - 点击底部键盘条后，按键转发给页面；Esc 交还提示符。
 - 窄于 48 列显示降级提示。

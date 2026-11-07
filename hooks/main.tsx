@@ -40,6 +40,29 @@ function shortHref(href: string): string {
   return href.length > 64 ? `${href.slice(0, 61)}…` : href
 }
 
+/** Cut a line to the pane's width without wrapping. */
+function clip(text: string, width: number): string {
+  const max = Math.max(0, Math.floor(width))
+  return text.length > max ? text.slice(0, max) : text
+}
+
+/** A section header with rules filling the pane's width: ── COUNTER ─────. */
+function sectionRule(label: string, width: number): string {
+  const name = ` ${label} `
+  const dashes = Math.max(0, Math.floor(width) - 2 - name.length)
+  return clip(`──${name}${'─'.repeat(dashes)}`, width)
+}
+
+/** Rows indent by their document depth, capped so they stay readable. */
+function indentFor(row: ViewRow): string {
+  return ' '.repeat(Math.min(Math.max(row.depth ?? 0, 0), 3))
+}
+
+/** The fixed status line: mode, the visible window, and the last audit entry. */
+function statusLine(model: ViewModel, shown: number, width: number): string {
+  return clip(`${model.mode} · ${shown}/${model.rows.length} shown · ${model.audit[0] ?? 'no actions yet'}`, width)
+}
+
 function makeOps($: EngineInterface): Ops {
   return {
     root: $.plugin.root,
@@ -250,14 +273,9 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    // Page actions first, view actions after a dim rule: one row, no new verbs.
     const toolbar = (
       <Box flexDirection="row" gap={1}>
-        <Button key="snap" plain onPress={() => void transom.refresh('viewport')}>
-          <Text dimColor>refresh</Text>
-        </Button>
-        <Button key="doc" plain onPress={() => void transom.refresh('document')}>
-          <Text dimColor>whole page</Text>
-        </Button>
         <Button key="back" plain onPress={() => void transom.act({ kind: 'back' }, 'person')}>
           <Text dimColor>back</Text>
         </Button>
@@ -270,11 +288,18 @@ export const register: Register = (on, options) => {
         <Button key="down" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: 4 }, 'person')}>
           <Text dimColor>pgdn</Text>
         </Button>
-        <Button key="visual" plain onPress={() => showVisual($, ops, transom, width, rows, model.mode)}>
-          <Text dimColor>{model.mode === 'visual' ? 'text mode' : 'visual'}</Text>
-        </Button>
         <Button key="enter" plain onPress={() => void transom.act({ kind: 'press', key: 'Enter' }, 'person')}>
           <Text dimColor>enter</Text>
+        </Button>
+        <Text key="sep" dimColor>│</Text>
+        <Button key="snap" plain onPress={() => void transom.refresh('viewport')}>
+          <Text dimColor>refresh</Text>
+        </Button>
+        <Button key="doc" plain onPress={() => void transom.refresh('document')}>
+          <Text dimColor>whole page</Text>
+        </Button>
+        <Button key="visual" plain onPress={() => showVisual($, ops, transom, width, rows, model.mode)}>
+          <Text dimColor>{model.mode === 'visual' ? 'text mode' : 'visual'}</Text>
         </Button>
       </Box>
     )
@@ -308,6 +333,7 @@ export const register: Register = (on, options) => {
             </Button>
           ))}
           {toolbar}
+          <Text key="status" dimColor>{statusLine(model, 0, width)}</Text>
           <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
         </Box>
       )
@@ -321,21 +347,31 @@ export const register: Register = (on, options) => {
           {header}
           {toolbar}
           <Raster key="shot" columns={rasterCols} rows={rasterRows} cells={shot.cells} />
+          <Text key="status" dimColor>{statusLine(model, model.rows.length, width)}</Text>
           <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
         </Box>
       )
     }
 
     const shown = model.rows.slice(0, room)
+    const firstSection = shown.find(one => one.role === 'section')?.ref
     return (
       <Box flexDirection="column" width="100%">
         {header}
         {toolbar}
         {shown.map(row => {
+          if (row.role === 'section') {
+            return (
+              <Box key={row.ref} flexDirection="column">
+                {row.ref === firstSection ? null : <Text dimColor>{clip('─'.repeat(width), width)}</Text>}
+                <Text bold>{sectionRule(row.label, width)}</Text>
+              </Box>
+            )
+          }
           if (row.role === 'text' || row.role === 'heading') {
             return (
               <Text key={row.ref} dimColor={row.role === 'text'} bold={row.role === 'heading'}>
-                {row.role === 'heading' ? '#' : '·'} {row.label}
+                {indentFor(row)}{row.role === 'heading' ? '#' : '·'} {row.label}
               </Text>
             )
           }
@@ -343,7 +379,7 @@ export const register: Register = (on, options) => {
             return (
               <Input
                 key={row.ref}
-                label={`${glyphFor(row)} ${row.label}`}
+                label={`${indentFor(row)}${glyphFor(row)} ${row.label}`}
                 placeholder="type and press Enter"
                 value={row.value ?? ''}
                 onSubmit={text => {
@@ -357,7 +393,7 @@ export const register: Register = (on, options) => {
             return (
               <Select
                 key={row.ref}
-                label={`${glyphFor(row)} ${row.label}`}
+                label={`${indentFor(row)}${glyphFor(row)} ${row.label}`}
                 options={options}
                 value={row.value}
                 onSelect={value => {
@@ -369,7 +405,7 @@ export const register: Register = (on, options) => {
           return (
             <Button key={row.ref} plain onPress={() => void pressRow(ops, transom, row)}>
               <Text dimColor={row.flags?.includes('disabled')}>
-                {glyphFor(row)} {row.label}
+                {indentFor(row)}{glyphFor(row)} {row.label}
                 {row.value ? <Text dimColor> = {row.value}</Text> : null}
                 {row.href ? <Text dimColor> → {shortHref(row.href)}</Text> : null}
                 {row.flags ? <Text dimColor> [{row.flags}]</Text> : null}
@@ -378,10 +414,12 @@ export const register: Register = (on, options) => {
           )
         })}
         {model.rows.length > shown.length ? (
-          <Text dimColor>… {model.rows.length - shown.length} more below</Text>
+          <Button key="next" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: room }, 'person')}>
+            <Text dimColor>↓ next block ({model.rows.length - shown.length} more)</Text>
+          </Button>
         ) : null}
+        <Text key="status" dimColor>{statusLine(model, shown.length, width)}</Text>
         <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
-        {model.audit.length ? <Text dimColor>{model.audit[0]}</Text> : null}
       </Box>
     )
   })

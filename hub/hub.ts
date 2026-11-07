@@ -17,6 +17,10 @@ export type ViewRow = {
   invalid?: boolean
   flags?: string
   submits?: boolean
+  /** The section a row belongs to; a `role: 'section'` row is the heading itself. */
+  section?: string
+  /** Document depth, used for the pane's indent (capped when drawn). */
+  depth?: number
 }
 
 export type ViewModel = {
@@ -276,15 +280,34 @@ export class Hub {
   }
 }
 
+/** More headings than this are drawn as plain text, not section headers. */
+export const MAX_SECTIONS = 12
+
 export function projectRows(snapshot: Snapshot, limit: number): ViewRow[] {
   const rows: ViewRow[] = []
+  let sections = 0
+  let section: string | undefined
   for (const node of snapshot.nodes) {
     if (rows.length >= limit) break
     const label = node.name || node.value || node.role
     if (!label) continue
+    let role = node.role
+    let rowSection = section
+    if (node.role === 'heading') {
+      if (sections < MAX_SECTIONS) {
+        // A heading becomes the section row itself and is not repeated below.
+        sections += 1
+        section = label.slice(0, 120)
+        rowSection = section
+        role = 'section'
+      } else {
+        // Past the cap a heading is ordinary text and does not open a section.
+        role = 'text'
+      }
+    }
     rows.push({
       ref: node.ref,
-      role: node.role,
+      role,
       label: label.slice(0, 120),
       value: node.value?.slice(0, 60),
       href: node.href?.slice(0, 500),
@@ -296,6 +319,8 @@ export function projectRows(snapshot: Snapshot, limit: number): ViewRow[] {
       invalid: node.invalid,
       flags: flagsOf(node),
       submits: node.submits,
+      section: rowSection,
+      depth: node.depth,
     })
   }
   return rows

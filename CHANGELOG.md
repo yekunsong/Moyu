@@ -15,7 +15,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Supervised local bridge: token-guarded loopback HTTP, health checks, exponential backoff, idle shutdown, process-tree cleanup.
 - Snapshot hardening: document-generation refs, password masking, `elementFromPoint` hit tests, untrusted-content banner, control-character stripping.
 - Demo fixture (counter, form, list, canvas, shadow DOM, same-origin iframe, overlay, long scroller).
-- Test suites: 16 real-Chrome bridge integration tests, 25 plugin/supervisor tests, `claude plugin validate` and `tsc` gates.
+- Test suites: 16 real-Chrome bridge integration tests, 26 plugin/supervisor tests, `claude plugin validate` and `tsc` gates.
 - Documentation: README (English + Simplified Chinese), security model, provider guide, verified competitive landscape, implementation plan.
 
 ### Known limitations
