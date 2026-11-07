@@ -215,6 +215,7 @@ export const register: Register = (on, options) => {
     const width = Math.max(20, e.props.bodyColumns)
     const rows = e.props.scroll.bodyRows || e.viewport?.rows || 28
     const room = Math.max(3, rows - 9)
+    transom.setViewport(width, rows)
     const degradation = negotiate(transom.provider.meta.capabilities, width, rows, false)
 
     const header = (

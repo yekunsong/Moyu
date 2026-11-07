@@ -51,6 +51,8 @@ export class Hub {
   #lastSnapshot: Snapshot | undefined
   #refresh: (() => void) | undefined
   #view: ViewModel = { ...EMPTY_VIEW }
+  #cols = 110
+  #rows = 34
 
   constructor(private readonly ops: Ops, options: Record<string, unknown>) {
     this.provider = new BrowserProvider(ops)
@@ -72,6 +74,12 @@ export class Hub {
 
   get view(): ViewModel {
     return this.#view
+  }
+
+  /** The pane body's size, reported by the drawing so snapshots match it. */
+  setViewport(cols: number, rows: number): void {
+    if (cols > 0) this.#cols = Math.min(Math.max(cols, 20), 240)
+    if (rows > 0) this.#rows = Math.min(Math.max(rows, 5), 120)
   }
 
   async showPane(): Promise<void> {
@@ -208,8 +216,8 @@ export class Hub {
       const snapshot = await this.provider.snapshot({
         scope,
         maxChars: this.config.snapshotMaxChars * 8,
-        cols: 110,
-        rows: 34,
+        cols: this.#cols,
+        rows: this.#rows,
       })
       this.#lastSnapshot = snapshot
       this.#setView({
