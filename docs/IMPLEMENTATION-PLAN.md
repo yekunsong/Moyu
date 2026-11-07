@@ -115,7 +115,35 @@ docs/
   PROVIDERS.md                 provider 作者指南
 ```
 
-### 3.2 provider 合同
+### 3.2 实际文件清单（v0.1）
+
+方案里的 `engine/frame-clock.ts`、`hub/registry.ts`、`hub/actions.ts` 最终没有单列：帧钟由引擎的 `surface.every`/状态订阅承担，provider 只有 browser 一个故注册表并入 `hub/hub.ts`，动作队列是 `Hub.enqueue`。其余按方案落地：
+
+```
+.claude-plugin/plugin.json  marketplace.json  icon.png
+hooks/main.tsx            装配、命令、面板、Ops 字面量
+hooks/tools.ts            五个模型工具 + 输出投影
+engine/ops.ts             窄接口类型
+engine/adapter.ts         fetchJson / ask / store 包装
+engine/supervisor.ts      子进程、握手、健康、退避、停止
+hub/hub.ts                动作队列、视图投影、审计接线、状态机
+hub/permissions.ts        协议/主机白名单与动作分级
+hub/audit.ts              环形审计 + $.store 持久
+hub/negotiate.ts          能力协商与降级
+providers/browser/contract.ts  Provider 合同
+providers/browser/client.ts    Provider 实现（HTTP → bridge）
+providers/browser/keys.tsx     键盘 Client
+providers/browser/rows.ts      面板行 → 动作
+bridge/bridge.mjs         HTTP + Chrome 生命周期 + /raster
+bridge/cdp.mjs            无依赖 CDP WebSocket 客户端
+bridge/page-agent.mjs     注入页面的快照/动作脚本
+bridge/paths.mjs          浏览器发现
+demo/                     演示应用与静态服务器
+tests/                    插件测试、supervisor 单测、bridge 集成测试
+scripts/make-icon.mjs     生成 512px 图标
+```
+
+### 3.3 provider 合同
 
 ```ts
 type Capabilities = {
@@ -168,7 +196,7 @@ type Provider = {
 
 `act` 返回 `{ ok, changed, message, auditId }`；`changed` 让面板决定要不要立刻重取快照。任何 provider 抛错都归一成 `ActResult` 的错误态，不向上炸。
 
-### 3.3 动作流向
+### 3.4 动作流向
 
 ```
 人点击面板 ──ui.message──┐
@@ -184,14 +212,14 @@ type Provider = {
 
 队列串行、可插队（人的点击优先于排队中的模型动作）、每个动作带 `actor: 'person' | 'model'`。来源同时写进审计和 `$.ui.log` 的短行。
 
-### 3.4 焦点令牌
+### 3.5 焦点令牌
 
 - 全局唯一 `FocusToken`：`{ holder: 'prompt' | 'pane'; since }`。
 - 点击面板取得；`Esc` 无条件交还（`closeOnEscape: false`，Esc 只还焦）。
 - 只有持有令牌时 `surface.onKey` 才把按键转发给 provider；不持有时的指针事件仍作为 pointer 转发（`fine` 坐标换算成 CSS px）。
 - `turn.complete` 不卸载面板、不抢焦。
 
-### 3.5 渲染与降级
+### 3.6 渲染与降级
 
 - 文本档（默认）：`Box/Text/Button` 构成的列表，按 `role` 着色，ref 作为可点击 key。
 - 彩色格档（M2）：`Raster` 铺可见区缩略图（bridge 用 Chrome 自身 canvas 降采样成 u32 格子），叠一层极薄的 `Client` 收指针；只重画脏矩形。
@@ -199,14 +227,14 @@ type Provider = {
 - 协商：`columns < minCols` 或 `rows < minRows` → 摘要行；tmux（无 `fine`）→ 去掉子格悬停精度；`keys=false` → 隐藏按键提示。
 - 帧率：文本随动作/轮询（`every(800)`）刷新；Raster 限 4 fps；不可见/失焦停钟。
 
-### 3.6 上下文策略
+### 3.7 上下文策略
 
 - 工具默认 `scope: 'viewport'`，硬上限 12000 字符（可配置到 30000）。
 - 超出按重要度裁剪：先留 `landmarks` 和可交互节点，再截断文本节点，报告 `truncated`。
 - `scope: 'document'` 显式请求时才给整页，且同样裁剪。
 - 快照携带 `capturedAt` 与 `etag`（内容 hash）；模型重复取到相同页面时给短摘要。
 
-### 3.7 权限模型
+### 3.8 权限模型
 
 - 配置项（`plugin.json` `userConfig`，带默认值）：`allowedHosts`（逗号分隔，含 `localhost`）、`allowedSchemes`（默认 `https,http`）、`writePolicy`（`confirm` | `once` | `auto`，默认 `confirm`）、`snapshotMaxChars`。
 - 每次 `navigate` 先解析 URL：协议不在白名单 → 拒；主机不在白名单 → 确认后可临时放行（会话内记忆）。
@@ -215,14 +243,14 @@ type Provider = {
 - 所有确认走 `$.ui.ask`，拒绝即 `{ deny }`，模型收到原因。
 - 凭证：不注入、不读出密码框值（快照里 `value: "••••"`）；需要登录的目标交给用户自己的浏览器配置目录（可选 `--user-data-dir`）。
 
-### 3.8 审计
+### 3.9 审计
 
 - 每条 `{ id, ts, actor, provider, kind, target, url, policy, result, durationMs }`。
 - 内存环形 500 条 + `$.store` 持久 2000 条（跨会话），`/transom audit` 打印最近记录。
 - 模型动作的 `tool.call` 结果里带 `auditId`；人动作在 `$.ui.status` 一闪。
 - 失败、拒绝同样入账。
 
-### 3.9 进程与崩溃
+### 3.10 进程与崩溃
 
 - `supervisor.start()`：Chrome 以 `--headless=new --remote-debugging-port=0 --user-data-dir=<临时> --no-first-run --disable-extensions --hide-scrollbars` 启动，读 `DevToolsActivePort` 拿端口。
 - bridge 先起（stdout 首行 `{"ready":true,"port":N}`），再由它拉起 Chrome。
@@ -230,7 +258,7 @@ type Provider = {
 - `session.end`、模块卸载、`/transom close` 都走 `stop()`：先 `Browser.close`，再杀进程树（Windows `taskkill /T /F`，其他 `kill(-pid)`）。
 - 面板错误态含原因、重连按钮、最近审计。
 
-### 3.10 引擎适配层
+### 3.11 引擎适配层
 
 - `engine/adapter.ts` 导出窄接口：`pane.open/close`、`ui.askParagraph`、`tool.registerAll`、`store.get/set`、`log`、`status`、`spawn`、`fetch`。其余代码只认这些。
 - 启动时 `$.session.version()` 记版本；未知大版本进保守模式（只开文本档）。
@@ -254,6 +282,7 @@ type Provider = {
 3. **`$` 不跨模块传递**：`claude plugin validate` 禁止把 `$` 当参数传；hub/provider 接收 `engine/ops.ts` 的窄接口，`Ops` 在 hooks 模块里内联构造。
 4. **测试的 fake bridge**：`claude plugin test` 无网络/进程，`tests/helpers.ts` 以内存页冒充 bridge，覆盖权限、审计、渲染、降级与重启。
 5. **健康检查**：supervisor 每 5s `/health`，连续失败按 250ms×2^n 退避重启，4 次后进错误面板；bridge 空闲 10 分钟自停（健康轮询不算活动）。
+6. **焦点令牌交给引擎**：不再自建全局令牌。点击面板由引擎夺焦、Esc 无条件交还（`closeOnEscape` 不开），`ui.render` 读 `isFocused` 决定键盘条是否转发。只有一套焦点，少了同步两套状态的风险。
 
 每完成一个里程碑：`tsc` + `validate` + 测试 + 本地提交。
 
@@ -266,7 +295,7 @@ type Provider = {
 | 页面对快照脚本不友好（shadow DOM、iframe、canvas） | 开放 shadow root 递归；iframe 同源展开、跨源给占位；canvas 走视觉档 |
 | 快照脚本被 CSP 拦 | 用 `Runtime.evaluate` 注入函数源码，不经 `<script>` |
 | 页面反复重排导致 ref 失效 | ref 绑定后端节点，动作前校验；失效返回 `stale-ref` 并附新快照 |
-| 上下文污染 | §3.6 策略 + 硬上限 |
+| 上下文污染 | §3.7 策略 + 硬上限 |
 | 端口/令牌泄漏 | 只绑 `127.0.0.1`，随机 32 字节 token，子进程 env 传入，不进命令行 |
 | Chrome 多实例占内存 | supervisor 单实例；`/transom close` 立即释放；空闲 10 分钟自动停 |
 | Windows 进程树残留 | `taskkill /T /F` + 临时 profile 目录清理（会话结束尽力删） |
