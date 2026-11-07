@@ -36,6 +36,7 @@ let lastError = null
 let currentUrl = 'about:blank'
 let currentTitle = ''
 let navigations = 0
+let lastActivity = Date.now()
 let browserProduct = 'unknown'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -419,6 +420,7 @@ const server = createServer(async (req, res) => {
     return
   }
   try {
+    if (req.method === 'POST' || key !== 'GET /health') lastActivity = Date.now()
     const body = req.method === 'POST' ? await readBody(req) : {}
     const result = await route(body)
     send(res, 200, result)
@@ -466,6 +468,16 @@ server.listen(0, '127.0.0.1', async () => {
 function send_to_stdout(value) {
   process.stdout.write(JSON.stringify(value) + '\n')
 }
+
+// A bridge whose page nobody touches for ten minutes is recycled; health
+// polls by the supervisor do not count as activity.
+const idle = setInterval(() => {
+  if (Date.now() - lastActivity > 10 * 60 * 1000) {
+    process.stderr.write('bridge: idle for 10 minutes, stopping\n')
+    void shutdown(0)
+  }
+}, 60 * 1000)
+idle.unref?.()
 
 process.on('SIGTERM', () => void shutdown(0))
 process.on('SIGINT', () => void shutdown(0))

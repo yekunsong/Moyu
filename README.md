@@ -2,7 +2,7 @@
 
 > 在 Claude Code 会话里，为任意应用开一扇可看、可操作、可被模型调用的边窗。
 
-状态：调研完成，实现中（方案见 `docs/IMPLEMENTATION-PLAN.md`）
+状态：v0.1 可用（M0–M4 完成；方案见 `docs/IMPLEMENTATION-PLAN.md`）
 日期：2026-11-07
 目标平台：Claude Code CLI（function hooks / Mods，early access）
 工作目录：`D:/Study/transom`
@@ -14,6 +14,59 @@
 把终端外部应用压成一对接口——`snapshot()` 读状态、`act()` 执行动作——画在会话侧栏里，人和模型共用同一条通道，动作留痕、受权限约束。
 
 窗口从外部搬到会话里只是副产品。真正的产出是**结构化、可寻址、可审计的应用状态**。
+
+## 1.1 安装与运行（v0.1）
+
+依赖：Node 20+（本机 22），以及本机已安装的 Chrome / Chromium / Edge 之一（或设 `TRANSOM_CHROME`）。
+
+```bash
+/plugin install transom --marketplace <owner>/<repo>
+```
+
+开发时直接从目录加载：
+
+```bash
+CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir D:/Study/transom
+```
+
+只在**交互式终端**里可用（`-p`、桌面、移动端不加载 function hooks）。
+
+### 命令
+
+| 命令 | 作用 |
+|---|---|
+| `/transom` | 打开面板 |
+| `/transom open <url>` | 打开面板并导航（默认只允许 localhost/127.0.0.1 与配置里的主机） |
+| `/transom demo` | 起一个本地演示页（计数、表单、列表、canvas、shadow DOM、iframe、长滚动）并打开 |
+| `/transom audit` | 最近 20 条动作审计 |
+| `/transom close` | 关闭面板并停止浏览器 |
+
+### 模型工具
+
+`mcp__transom__browser_open`、`browser_snapshot`、`browser_act`（click/fill/select/press/scroll/hover/focus/navigate/back/forward/reload）、`browser_screenshot`、`browser_audit`。
+
+快照是带稳定 ref 的结构化对象图；`ref` 在下一次快照或导航前有效，失效会返回 `stale` 而不是误点。默认只给可见区，`scope: "document"` 才给整页，两者都有字符上限。
+
+### 面板
+
+- 人点行 = 立刻执行（人看得到页面）；模型写动作默认逐次确认，可选 `once` / `auto`。
+- `visual` 切彩色格档（半格块 24 位色），再按一次回文本档。
+- 点击面板底部键盘条后，按键转发给页面；Esc 交还提示符。
+- 窄于 48 列显示降级提示。
+
+### 校验
+
+```bash
+claude plugin validate .
+npx --yes --package typescript@5 tsc -p .
+claude plugin test .
+node --test tests/bridge/bridge.test.mjs
+```
+
+### 配置（`plugin.json` 的 `userConfig`）
+
+`allowedHosts`（逗号分隔，localhost 恒允许）、`writePolicy`（`confirm`/`once`/`auto`）、`snapshotMaxChars`。
+
 
 ## 2. 为什么是它
 

@@ -238,14 +238,22 @@ type Provider = {
 
 ## 4. 里程碑与验收
 
-| 里程碑 | 内容 | 验收 |
-|---|---|---|
-| M0 探针 | 最小 manifest + 面板 + Client 指针 + 子进程 stdout 回显 | `validate` 通过；会话里面板可点、可打印坐标 |
-| M1 合同与 bridge | provider 合同、supervisor、bridge、CDP、快照/动作、演示页 | `node tests/bridge/*.mjs` 全绿：起浏览器、取快照、点、填、滚动、导航 |
-| M2 人与模型共用 | hub/actions、权限、审计、工具注册、面板交互、焦点 | `claude plugin test` 全绿；模型中点按钮与人中点按钮产生同样审计 |
-| M3 视觉档 | Raster 降采样、脏区重绘、Image 档 | 4 fps 下 10 秒无掉帧告警；坐标误差 ≤1 格 |
-| M4 降级与崩溃 | 协商、错误面板、退避、进程树清理 | 杀 Chrome 后 8s 内恢复；窄终端落摘要行 |
-| M5 文档与打包 | INSTALL、SECURITY、PROVIDERS、marketplace 清单 | 干净目录安装可跑；README 安装段可照做 |
+| 里程碑 | 内容 | 验收 | 状态 |
+|---|---|---|---|
+| M0 探针 | 最小 manifest + 面板 + Client 指针 + 子进程 stdout 回显 | `validate` 通过；会话里面板可点、可打印坐标 | ✅ 完成 |
+| M1 合同与 bridge | provider 合同、supervisor、bridge、CDP、快照/动作、演示页 | `node tests/bridge/*.mjs` 全绿：起浏览器、取快照、点、填、滚动、导航 | ✅ 完成（11 项集成测试） |
+| M2 人与模型共用 | hub/actions、权限、审计、工具注册、面板交互、焦点 | `claude plugin test` 全绿；模型中点按钮与人中点按钮产生同样审计 | ✅ 完成（21 项测试） |
+| M3 视觉档 | Raster 降采样、脏区重绘、Image 档 | 4 fps 下 10 秒无掉帧告警；坐标误差 ≤1 格 | ✅ 半格块 Raster 完成；脏区重绘与 Image 档未做 |
+| M4 降级与崩溃 | 协商、错误面板、退避、进程树清理 | 杀 Chrome 后 8s 内恢复；窄终端落摘要行 | ✅ 协商/重启/空闲回收完成；真实杀进程冒烟待人工执行 |
+| M5 文档与打包 | INSTALL、SECURITY、PROVIDERS、marketplace 清单 | 干净目录安装可跑；README 安装段可照做 | ✅ 文档/清单/图标完成；人工安装冒烟待执行 |
+
+### 实现中的偏差（与方案不同，已定稿）
+
+1. **Raster 解码在页面里做**：bridge 截图后用页面自身的 `OffscreenCanvas` 降采样成半格块 u32，避免引第三方图像库。每格上方背景、下方前景，码点 U+2584。
+2. **视觉帧不进状态**：一帧 Raster 最大 512×256×12 字节，放 `$.state` 不合适；存在 `hooks/main.tsx` 的模块变量里，热重载后回文本档。
+3. **`$` 不跨模块传递**：`claude plugin validate` 禁止把 `$` 当参数传；hub/provider 接收 `engine/ops.ts` 的窄接口，`Ops` 在 hooks 模块里内联构造。
+4. **测试的 fake bridge**：`claude plugin test` 无网络/进程，`tests/helpers.ts` 以内存页冒充 bridge，覆盖权限、审计、渲染、降级与重启。
+5. **健康检查**：supervisor 每 5s `/health`，连续失败按 250ms×2^n 退避重启，4 次后进错误面板；bridge 空闲 10 分钟自停（健康轮询不算活动）。
 
 每完成一个里程碑：`tsc` + `validate` + 测试 + 本地提交。
 
