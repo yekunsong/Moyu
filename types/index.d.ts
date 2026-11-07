@@ -3,6 +3,9 @@ export type ViewRow = {
   role: string
   label: string
   value?: string
+  href?: string
+  options?: Array<{ value: string; label: string; selected?: boolean }>
+  invalid?: boolean
   flags?: string
   submits?: boolean
 }

@@ -79,7 +79,41 @@ test('snapshot is structured and interactive refs exist', async () => {
   assert.ok(body.landmarks.length > 0)
 })
 
+test('select options, link href and invalid state are in the snapshot', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { scope: 'viewport', maxChars: 50000 })).body
+
+  const plan = snap.nodes.find(node => node.role === 'combobox' && node.name === 'Plan')
+  assert.ok(plan, 'Plan select present')
+  assert.deepEqual(plan.options.map(option => option.value), ['free', 'team', 'enterprise'])
+  assert.equal(plan.options.find(option => option.value === 'team').label, 'Team')
+  assert.equal(plan.options.find(option => option.selected).value, 'free')
+
+  const link = snap.nodes.find(node => node.role === 'link' && node.name.includes('Frame page'))
+  assert.ok(link, 'Frame page link present')
+  assert.match(link.href, /^https?:\/\/[^/]+\/frame\.html$/)
+
+  const email = snap.nodes.find(node => node.role === 'textbox' && node.name === 'Email')
+  assert.equal(email.invalid, true, 'required empty field is invalid')
+})
+
+test('a todo checkbox carries its checked state', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { scope: 'viewport', maxChars: 50000 })).body
+  const todo = snap.nodes.find(node => node.name === 'New todo')
+  assert.ok(todo, 'todo input present')
+  await json('/act', { action: { kind: 'fill', ref: todo.ref, text: 'Buy milk' } })
+  const pressed = await json('/act', { action: { kind: 'press', key: 'Enter' } })
+  assert.equal(pressed.body.ok, true)
+
+  const after = (await json('/snapshot', { scope: 'viewport', maxChars: 50000 })).body
+  const checkbox = after.nodes.find(node => node.role === 'checkbox' && node.name === 'Done: Buy milk')
+  assert.ok(checkbox, 'todo checkbox present')
+  assert.equal(checkbox.state.checked, false)
+})
+
 test('click, fill, select and submit work through refs', async () => {
+  await json('/navigate', { url: demo.url })
   const snap = (await json('/snapshot', { maxChars: 50000 })).body
   const inc = snap.nodes.find(node => node.name === 'Increase count')
   await json('/act', { action: { kind: 'click', ref: inc.ref } })
@@ -91,7 +125,9 @@ test('click, fill, select and submit work through refs', async () => {
   const email = afterClick.nodes.find(node => node.role === 'textbox' && node.name === 'Email')
   await json('/act', { action: { kind: 'fill', ref: email.ref, text: 'a@b.c' } })
   const filled = (await json('/snapshot', { maxChars: 50000 })).body
-  assert.equal(filled.nodes.find(node => node.name === 'Email').value, 'a@b.c')
+  const filledEmail = filled.nodes.find(node => node.name === 'Email')
+  assert.equal(filledEmail.value, 'a@b.c')
+  assert.equal(filledEmail.invalid, undefined, 'a filled required field is no longer invalid')
 
   const plan = filled.nodes.find(node => node.role === 'combobox')
   await json('/act', { action: { kind: 'select', ref: plan.ref, value: 'team' } })

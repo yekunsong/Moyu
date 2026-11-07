@@ -11,6 +11,9 @@ export type FakePage = {
   title: string
   count: number
   fills: Record<string, string>
+  selects: Record<string, string>
+  fillCalls: Array<{ ref: string; text: string }>
+  selectCalls: Array<{ ref: string; value: string }>
 }
 
 export type Bottom = {
@@ -25,7 +28,15 @@ export type Bottom = {
 }
 
 export function installBottom(on: On): Bottom {
-  const page: FakePage = { url: 'http://127.0.0.1:1/', title: 'Demo page', count: 0, fills: {} }
+  const page: FakePage = {
+    url: 'http://127.0.0.1:1/',
+    title: 'Demo page',
+    count: 0,
+    fills: {},
+    selects: {},
+    fillCalls: [],
+    selectCalls: [],
+  }
   const asks: string[] = []
   const fetches: string[] = []
   let askAnswer: string | undefined = 'Allow'
@@ -101,8 +112,23 @@ export function installBottom(on: On): Bottom {
         landmarks: [{ role: 'heading', name: page.title }],
         nodes: [
           { ref: 't1', role: 'button', name: 'Increase count', depth: 1, interactive: true, bounds: { x: 0, y: 0, w: 10, h: 2 } },
-          { ref: 't2', role: 'textbox', name: 'Email', depth: 1, interactive: true, value: page.fills['t2'] ?? '', bounds: { x: 0, y: 2, w: 10, h: 2 } },
+          { ref: 't2', role: 'textbox', name: 'Email', depth: 1, interactive: true, value: page.fills['t2'] ?? '', invalid: true, bounds: { x: 0, y: 2, w: 10, h: 2 } },
           { ref: 't3', role: 'text', name: `count ${page.count}`, depth: 1, bounds: { x: 0, y: 4, w: 10, h: 1 } },
+          {
+            ref: 't4',
+            role: 'combobox',
+            name: 'Plan',
+            depth: 1,
+            interactive: true,
+            value: page.selects['t4'] ?? 'free',
+            options: [
+              { value: 'free', label: 'Free', selected: (page.selects['t4'] ?? 'free') === 'free' },
+              { value: 'team', label: 'Team', selected: page.selects['t4'] === 'team' },
+              { value: 'enterprise', label: 'Enterprise', selected: page.selects['t4'] === 'enterprise' },
+            ],
+            bounds: { x: 0, y: 5, w: 10, h: 2 },
+          },
+          { ref: 't5', role: 'link', name: 'Frame page', depth: 1, interactive: true, href: 'http://127.0.0.1:1/frame.html', bounds: { x: 0, y: 7, w: 10, h: 1 } },
         ],
         truncated: { nodes: 0, chars: 0, scope: 'viewport' },
       })
@@ -110,7 +136,14 @@ export function installBottom(on: On): Bottom {
     }
     if (path === '/act') {
       if (body.kind === 'click' && body.ref === 't1') page.count += 1
-      if (body.kind === 'fill') page.fills[body.ref] = body.text
+      if (body.kind === 'fill') {
+        page.fills[body.ref] = body.text
+        page.fillCalls.push({ ref: body.ref, text: body.text })
+      }
+      if (body.kind === 'select') {
+        page.selects[body.ref] = body.value
+        page.selectCalls.push({ ref: body.ref, value: body.value })
+      }
       if (body.kind === 'navigate') page.url = body.url
       return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, changed: true, message: `did ${body.kind}` }) })
     }

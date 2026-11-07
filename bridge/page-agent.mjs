@@ -170,6 +170,9 @@ export const SNAPSHOT = String.raw`
     return undefined
   }
 
+  // Declared before walk(): the snapshot uses it for option labels and hrefs.
+  const clean = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()
+
   const stateOf = el => {
     const out = {}
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') out.disabled = true
@@ -205,6 +208,27 @@ export const SNAPSHOT = String.raw`
     if (value !== undefined && value !== '') node.value = String(value).slice(0, 500)
     const st = stateOf(el)
     if (st) node.state = st
+    if (el.tagName === 'SELECT') {
+      const options = []
+      for (const option of Array.from(el.options).slice(0, 50)) {
+        options.push({
+          value: clean(option.value).slice(0, 200),
+          label: clean(option.textContent || '').slice(0, 80),
+          selected: !!option.selected,
+        })
+      }
+      if (options.length) node.options = options
+    }
+    if (el.tagName === 'A' && el.hasAttribute('href')) {
+      const href = clean(el.href).slice(0, 500)
+      if (href) node.href = href
+    }
+    if (
+      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') &&
+      (el.getAttribute('aria-invalid') === 'true' || (el.required && valueOf(el) === ''))
+    ) {
+      node.invalid = true
+    }
     if (el.tagName === 'BUTTON' && (el.getAttribute('type') || '').toLowerCase() === 'submit') node.submits = true
     if (el.tagName === 'INPUT' && (el.getAttribute('type') || '').toLowerCase() === 'submit') node.submits = true
     if (isInteractive(el)) node.interactive = true
@@ -241,8 +265,6 @@ export const SNAPSHOT = String.raw`
   }
 
   walk(document.body || document.documentElement, 0)
-
-  const clean = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()
 
   return {
     url: clean(location.href),

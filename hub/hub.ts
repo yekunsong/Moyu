@@ -12,6 +12,9 @@ export type ViewRow = {
   role: string
   label: string
   value?: string
+  href?: string
+  options?: Array<{ value: string; label: string; selected?: boolean }>
+  invalid?: boolean
   flags?: string
   submits?: boolean
 }
@@ -284,6 +287,13 @@ export function projectRows(snapshot: Snapshot, limit: number): ViewRow[] {
       role: node.role,
       label: label.slice(0, 120),
       value: node.value?.slice(0, 60),
+      href: node.href?.slice(0, 500),
+      options: node.options?.map(option => ({
+        value: option.value.slice(0, 200),
+        label: option.label.slice(0, 80),
+        selected: option.selected,
+      })),
+      invalid: node.invalid,
       flags: flagsOf(node),
       submits: node.submits,
     })
@@ -296,6 +306,7 @@ function flagsOf(node: Snapshot['nodes'][number]): string | undefined {
   if (node.state?.disabled) flags.push('disabled')
   if (node.state?.checked) flags.push('checked')
   if (node.state?.focused) flags.push('focused')
+  if (node.invalid) flags.push('invalid')
   if (node.submits) flags.push('submit')
   return flags.length ? flags.join(',') : undefined
 }
@@ -319,6 +330,8 @@ export function renderSnapshotText(snapshot: Snapshot, maxChars: number): string
     const bits = [`[${node.ref}]`, node.role]
     if (node.name) bits.push(JSON.stringify(clean(node.name)))
     if (node.value !== undefined) bits.push(`= ${JSON.stringify(node.value)}`)
+    if (node.href) bits.push(`href=${JSON.stringify(node.href.slice(0, 300))}`)
+    if (node.options?.length) bits.push(optionsText(node.options))
     const flags = flagsOf(node)
     if (flags) bits.push(`(${flags})`)
     const line = bits.join(' ')
@@ -332,6 +345,18 @@ export function renderSnapshotText(snapshot: Snapshot, maxChars: number): string
   lines.push('')
   lines.push('refs are valid until the next snapshot or navigation')
   return lines.join('\n')
+}
+
+// Compact for the model: `value`, `value=label` when they differ, `*` marks
+// the selected option.
+function optionsText(options: Array<{ value: string; label: string; selected?: boolean }>): string {
+  const parts = options.map(option => {
+    const value = clean(option.value)
+    const label = clean(option.label)
+    const text = label && label !== value ? `${value}=${label}` : value
+    return option.selected ? `${text}*` : text
+  })
+  return `options=[${parts.join(', ')}]`
 }
 
 function targetLabel(action: Action, snapshot: Snapshot | undefined): string {

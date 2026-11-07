@@ -21,6 +21,9 @@ export type SnapshotNode = {
   name: string
   depth: number
   value?: string
+  href?: string
+  options?: Array<{ value: string; label: string; selected?: boolean }>
+  invalid?: boolean
   interactive?: boolean
   submits?: boolean
   state?: {

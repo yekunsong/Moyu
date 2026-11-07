@@ -212,3 +212,43 @@ test('navigating to a non-listed host asks, and denial keeps the URL', async ($,
   expect(denied.text ?? '').toContain('denied')
   expect(bottom.page.url).toBe('http://127.0.0.1:1/')
 })
+
+test('inline textbox Input fills and combobox Select picks without a dialog', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  expect(await ui.find({ type: 'Input', key: 't2' }), 'textbox Input').toBeDefined()
+  const select = await ui.find({ type: 'Select', key: 't4' })
+  expect(select, 'combobox Select').toBeDefined()
+  expect(JSON.stringify(select?.props.options)).toContain('team')
+
+  await ui.input({ key: 't2', text: 'a@b.c' })
+  expect(bottom.page.fillCalls).toContainEqual({ ref: 't2', text: 'a@b.c' })
+  expect(bottom.page.fills['t2']).toBe('a@b.c')
+
+  await ui.select({ key: 't4', value: 'team' })
+  expect(bottom.page.selectCalls).toContainEqual({ ref: 't4', value: 'team' })
+  expect(bottom.page.selects['t4']).toBe('team')
+
+  // Neither inline act opened a modal dialog.
+  expect(bottom.asks.length).toBe(0)
+
+  // The model's snapshot carries the new fields.
+  const snap = await tool($, 'browser_snapshot', {})
+  expect(snap.text ?? '').toContain('options=[')
+  expect(snap.text ?? '').toContain('team=Team*')
+  expect(snap.text ?? '').toContain('href=')
+  expect(snap.text ?? '').toContain('frame.html')
+  await ui.unmount()
+})

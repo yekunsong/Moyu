@@ -10,6 +10,8 @@ const ROLE_GLYPH: Record<string, string> = {
 }
 
 export async function pressRow(ops: Ops, hub: Hub, row: ViewRow): Promise<string | undefined> {
+  // The pane draws an Input for textbox/searchbox rows; this ask is only the
+  // fallback for a surface without an inline control.
   if (row.role === 'textbox' || row.role === 'searchbox') {
     const answer = await ops
       .ask(`New value for "${row.label}"? Type it under Other, or pick one of these.`, [
@@ -23,7 +25,9 @@ export async function pressRow(ops: Ops, hub: Hub, row: ViewRow): Promise<string
     return result.message
   }
 
-  if (row.role === 'combobox' || row.role === 'listbox') {
+  // A combobox/listbox with structured options gets an inline Select; the ask
+  // path stays only for one without options.
+  if ((row.role === 'combobox' || row.role === 'listbox') && !row.options?.length) {
     const answer = await ops
       .ask(`Which value for "${row.label}"? Type it under Other, or pick one of these.`, [
         'Keep current',

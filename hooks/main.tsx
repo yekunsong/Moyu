@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Ops } from '../engine/ops'
-import { EMPTY_VIEW, Hub, normaliseKey, type ViewModel } from '../hub/hub'
+import { EMPTY_VIEW, Hub, normaliseKey, type ViewModel, type ViewRow } from '../hub/hub'
 import { negotiate } from '../hub/negotiate'
 import { glyphFor, pressRow } from '../providers/browser/rows'
 import { registerToolSpecs, registerTools } from './tools'
@@ -22,6 +22,23 @@ let lastShot: { key: string; cells: string; columns: number; rows: number; url: 
 let hub: Hub | undefined
 let demo: { url: string } | undefined
 let demoStream: AsyncGenerator<unknown, unknown> | undefined
+
+// The engine's Select wants at least one option with unique values; the page's
+// options are neither guaranteed unique nor non-empty.
+function selectOptions(row: ViewRow): Array<{ value: string; label: string }> {
+  const seen = new Set<string>()
+  const options: Array<{ value: string; label: string }> = []
+  for (const option of row.options ?? []) {
+    if (seen.has(option.value)) continue
+    seen.add(option.value)
+    options.push({ value: option.value, label: option.label || option.value })
+  }
+  return options
+}
+
+function shortHref(href: string): string {
+  return href.length > 64 ? `${href.slice(0, 61)}…` : href
+}
 
 function makeOps($: EngineInterface): Ops {
   return {
@@ -189,7 +206,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE, surface: 'terminal' }, async ($, e) => {
-    const { Box, Text, Button, Client, Raster } = $.ui.resolve(e)
+    const { Box, Text, Button, Input, Select, Client, Raster } = $.ui.resolve(e)
     const ops: Ops = {
       root: $.plugin.root,
       ask: (question, options) => $.ui.ask(question, options),
@@ -314,21 +331,52 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" width="100%">
         {header}
         {toolbar}
-        {shown.map(row =>
-          row.role === 'text' || row.role === 'heading' ? (
-            <Text key={row.ref} dimColor={row.role === 'text'} bold={row.role === 'heading'}>
-              {row.role === 'heading' ? '#' : '·'} {row.label}
-            </Text>
-          ) : (
+        {shown.map(row => {
+          if (row.role === 'text' || row.role === 'heading') {
+            return (
+              <Text key={row.ref} dimColor={row.role === 'text'} bold={row.role === 'heading'}>
+                {row.role === 'heading' ? '#' : '·'} {row.label}
+              </Text>
+            )
+          }
+          if (row.role === 'textbox' || row.role === 'searchbox') {
+            return (
+              <Input
+                key={row.ref}
+                label={`${glyphFor(row)} ${row.label}`}
+                placeholder="type and press Enter"
+                value={row.value ?? ''}
+                onSubmit={text => {
+                  void transom.act({ kind: 'fill', ref: row.ref, text }, 'person')
+                }}
+              />
+            )
+          }
+          const options = row.role === 'combobox' || row.role === 'listbox' ? selectOptions(row) : []
+          if (options.length) {
+            return (
+              <Select
+                key={row.ref}
+                label={`${glyphFor(row)} ${row.label}`}
+                options={options}
+                value={row.value}
+                onSelect={value => {
+                  void transom.act({ kind: 'select', ref: row.ref, value }, 'person')
+                }}
+              />
+            )
+          }
+          return (
             <Button key={row.ref} plain onPress={() => void pressRow(ops, transom, row)}>
               <Text dimColor={row.flags?.includes('disabled')}>
                 {glyphFor(row)} {row.label}
                 {row.value ? <Text dimColor> = {row.value}</Text> : null}
+                {row.href ? <Text dimColor> → {shortHref(row.href)}</Text> : null}
                 {row.flags ? <Text dimColor> [{row.flags}]</Text> : null}
               </Text>
             </Button>
-          ),
-        )}
+          )
+        })}
         {model.rows.length > shown.length ? (
           <Text dimColor>… {model.rows.length - shown.length} more below</Text>
         ) : null}
