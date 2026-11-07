@@ -274,6 +274,7 @@ ref 必须来自应用自身的对象身份，不能是坐标或下标。ref 失
 ## 兼容性与限制
 
 - **终端：** kitty、Ghostty、iTerm2、WezTerm、foot 全功能；Windows Terminal、GNOME 降级；tmux 失去亚格精度。
+- **平台：** Windows、Linux、macOS 浏览器发现；bridge 测试已在 WSL Ubuntu（Node 22 + chrome-headless-shell）跑通。
 - **仅交互式：** 桌面版、移动端、无头会话不画面板。
 - **仅无头 Chrome：** 默认无登录态、无扩展、无音频、无多标签。
 - **Canvas 无语义：** canvas 内容以图像参与，不是节点。

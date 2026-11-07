@@ -317,6 +317,12 @@ See [`SECURITY.md`](SECURITY.md). Key points: the bridge is a loopback code-exec
 - Headless `claude -p` with a real model: `browser_open` + `browser_snapshot` return the page title and nodes; `browser_act` is denied under `-p` because no person can confirm — fail-closed as designed.
 - Found and fixed: tool result shape (object → string), refs rebinding across navigation, case-sensitive password masking, covered clicks reporting false success.
 
+### Phase L1 portability verification (2026-11-08)
+
+- Discovery: `bridge/paths.mjs` adds the Linux (`/usr/bin/google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`, `/snap/bin/chromium`, `/usr/bin/microsoft-edge`) and macOS app-bundle paths after `TRANSOM_CHROME` and the existing Windows candidates. `TRANSOM_CHROME` is read at call time, the Playwright cache glob is platform-aware, and two browser-free checks live in `tests/bridge/portability.test.mjs`.
+- Shutdown: on POSIX Chrome is spawned `detached` as a process-group leader, so `/stop` signals the whole tree with `SIGTERM` to `-pid` and `SIGKILL` after 800ms, each best effort. Windows keeps `chrome.kill()` and adds a delayed `taskkill /PID <pid> /T /F`. Attach mode never signals the person's browser.
+- WSL: Ubuntu 24.04 (WSL2, 16 GiB) ran the full `node --test tests/bridge/bridge.test.mjs` suite: **20/20 pass in 12.8s** with Node 22.23.4 (official linux-x64 tarball in `/tmp`) and chrome-headless-shell 157.0.8103.38 (Chrome for Testing linux64, resolved from `last-known-good-versions.json`, extracted with python3 `zipfile`). `ldd` reported no missing libraries, so no apt packages were installed. The temp runtimes, profiles, frames and run script were deleted; `wsl -t Ubuntu` left Ubuntu Stopped and no bridge/Chrome processes on Windows.
+
 ## 7. Test strategy
 
 1. **Static**: `tsc --noEmit`; `claude plugin validate`.

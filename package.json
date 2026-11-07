@@ -8,7 +8,7 @@
     "typecheck": "npx --yes --package typescript@5 tsc -p .",
     "validate": "claude plugin validate .",
     "test:plugin": "claude plugin test .",
-    "test:bridge": "node --test tests/bridge/bridge.test.mjs",
+    "test:bridge": "node --test tests/bridge/bridge.test.mjs tests/bridge/portability.test.mjs",
     "test": "npm run typecheck && npm run validate && npm run test:plugin && npm run test:bridge",
     "demo": "node demo/server.mjs",
     "icon": "node scripts/make-icon.mjs"

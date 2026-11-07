@@ -75,7 +75,15 @@ async function launch() {
     '--window-size=1280,800',
     'about:blank',
   ]
-  chrome = spawn(exe, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
+  // On POSIX `detached` makes Chrome its own process-group leader, so shutdown
+  // can signal the whole tree (`-pid`) instead of risking orphaned renderers.
+  // Windows has no process groups; it keeps Job-less `chrome.kill()` plus a
+  // best-effort `taskkill /T /F` fallback.
+  chrome = spawn(exe, args, {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    windowsHide: true,
+    detached: process.platform !== 'win32',
+  })
   let stderr = ''
   chrome.stderr.on('data', chunk => {
     stderr = (stderr + String(chunk)).slice(-8000)
@@ -632,6 +640,46 @@ const server = createServer(async (req, res) => {
   }
 })
 
+// Stop a browser this process launched. Called only when `owned`: an attached
+// browser belongs to the person and must survive `/stop`.
+async function stopOwnedChrome() {
+  if (!chrome || chrome.exitCode !== null) return
+  const pid = chrome.pid
+  if (process.platform === 'win32') {
+    try {
+      chrome.kill()
+    } catch {
+      /* already gone */
+    }
+    await sleep(300)
+    // npm-level child trees (renderers, crashpad) can outlive chrome.exe;
+    // taskkill is best effort and must never fail shutdown.
+    try {
+      const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+      killer.on('error', () => {})
+    } catch {
+      /* taskkill unavailable */
+    }
+    return
+  }
+  // POSIX: the child is a process-group leader (spawned detached), so the
+  // negative pid reaches Chrome and every renderer it started.
+  try {
+    process.kill(-pid, 'SIGTERM')
+  } catch {
+    /* group already gone */
+  }
+  await sleep(800)
+  try {
+    process.kill(-pid, 'SIGKILL')
+  } catch {
+    /* group already gone */
+  }
+}
+
 async function shutdown(code) {
   if (stopping) return
   stopping = true
@@ -652,13 +700,7 @@ async function shutdown(code) {
       /* ignore */
     }
     cdp?.close()
-    if (chrome && chrome.exitCode === null) {
-      try {
-        chrome.kill()
-      } catch {
-        /* ignore */
-      }
-    }
+    await stopOwnedChrome()
   } else {
     // Attached: leave the person's browser exactly as it was. Detach our
     // flattened session (best effort) and drop the socket.

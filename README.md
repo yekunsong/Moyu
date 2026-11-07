@@ -274,6 +274,7 @@ The color is real 24-bit foreground/background, not monochrome. Cells are still 
 ## Compatibility and limitations
 
 - **Terminals:** kitty, Ghostty, iTerm2, WezTerm and foot get the full feature set; Windows Terminal and GNOME degrade; tmux loses sub-cell precision.
+- **Platforms:** Windows, Linux and macOS browser discovery; the bridge suite is verified in WSL Ubuntu (Node 22, chrome-headless-shell).
 - **Interactive only:** desktop app, mobile and headless sessions do not draw the pane.
 - **Headless Chrome only:** no logged-in profile by default; no extensions, no audio, no tabs.
 - **No JS-rendered canvas semantics:** canvas content participates as an image, not as nodes.
