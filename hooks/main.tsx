@@ -222,6 +222,9 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         <Text bold>Transom · {model.title || 'no page'}</Text>
         <Text dimColor>{model.url || 'open a URL with /transom open <url> · local hosts only by default'}</Text>
+        {e.props.placement === 'inline' ? (
+          <Text dimColor>mouse needs fullscreen: CLAUDE_CODE_NO_FLICKER=1 · keyboard: ctrl+x tab</Text>
+        ) : null}
         {degradation.mode === 'summary' ? (
           <Text color="yellow">degraded: {degradation.reason}</Text>
         ) : model.last ? (

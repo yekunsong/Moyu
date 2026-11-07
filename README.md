@@ -28,10 +28,12 @@
 开发时直接从目录加载：
 
 ```bash
-CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir D:/Study/transom
+CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 claude --plugin-dir D:/Study/transom
 ```
 
-只在**交互式终端**里可用（`-p`、桌面、移动端不加载 function hooks）。
+`CLAUDE_CODE_NO_FLICKER=1` 开全屏布局：面板停靠右侧，**鼠标点击才生效**。没有它时面板画在提示符上方（inline），鼠标事件到不了按钮，只能 `ctrl+x tab` 夺焦后用 Tab/Enter。
+
+官方文档说 function hooks 只在交互式终端可用；实测 2.1.319 的 `claude -p` 也会加载插件工具（`--allowedTools mcp__transom__…` 可用于无头验证），但这是 early access 行为，不保证后续版本。
 
 ### 命令
 
@@ -51,6 +53,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir D:/Study/transom
 
 ### 面板
 
+- 鼠标点击需要全屏布局（`CLAUDE_CODE_NO_FLICKER=1`）；inline 面板只支持键盘焦点。
 - 人点行 = 立刻执行（人看得到页面）；模型写动作默认逐次确认，可选 `once` / `auto`。
 - `visual` 切彩色格档（半格块 24 位色），再按一次回文本档。
 - 点击面板底部键盘条后，按键转发给页面；Esc 交还提示符。

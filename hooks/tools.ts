@@ -15,11 +15,12 @@ type ToolOutput = {
 }
 
 function answer(text: string): ToolOutput {
-  return { result: { content: [{ type: 'text', text }] }, text }
+  // A plugin tool with no output schema: the result is its plain text.
+  return { result: text, text } as unknown as ToolOutput
 }
 
 function fail(text: string): ToolOutput {
-  return { result: { content: [{ type: 'text', text }] }, text, isError: true }
+  return { result: text, text, isError: true } as unknown as ToolOutput
 }
 
 const OPEN_SCHEMA = {
@@ -138,15 +139,7 @@ export function registerTools(on: On, deps: ToolDeps): void {
         actor: 'model', provider: 'browser', action: 'screenshot', url: hub().view.url,
         policy: 'read-only', ok: true, message: `${shot.cols}x${shot.rows}`,
       })
-      return {
-        result: {
-          content: [
-            { type: 'text', text: `screenshot ${shot.cols}x${shot.rows}, audit ${entry.id}` },
-            { type: 'image', data: shot.pngBase64, mimeType: 'image/png' },
-          ],
-        },
-        text: `screenshot ${shot.cols}x${shot.rows}, audit ${entry.id}`,
-      }
+      return answer(`screenshot ${shot.cols}x${shot.rows} captured, audit ${entry.id} (image available in the pane)`)
     } catch (error) {
       return fail(String((error as Error).message ?? error))
     }

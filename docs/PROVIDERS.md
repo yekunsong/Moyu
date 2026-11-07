@@ -77,6 +77,18 @@ type SnapshotNode = {
 
 文本档直接产出 `SnapshotNode[]` 就够；`hooks/main.tsx` 的 `projectRows` 会把它们变成按钮和文本。视觉档可选：实现 `raster()`，返回 `columns * rows` 个 u32 三元组 `[码点, 前景, 背景]` 的 base64。
 
+## 4.1 工具结果的形状（实测）
+
+`$.tool.register` 声明的工具没有 output schema 时，`tool.call` 的答复里 `result` 必须是**纯文本字符串**：
+
+```ts
+return { result: 'ok: clicked e12', text: 'ok: clicked e12' }
+```
+
+返回 MCP 风格的 `{ content: [{ type: 'text', ... }] }` 会被 2.1.319 判为
+`does not match its output shape: invalid_union … expected string, received object`。
+需要结构化数据时把它序列化成文本（或给工具声明 output schema，若该版本支持）。
+
 ## 5. 测试
 
 1. 纯逻辑测试放在 `tests/*.test.ts`（`claude plugin test .`）。
