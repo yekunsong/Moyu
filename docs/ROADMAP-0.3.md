@@ -11,7 +11,7 @@ Date: 2026-11-08
 - No long-lived processes or accumulated scripts. Tests spawn Chrome and must close it; temporary scripts live under `.tmp/` and are deleted.
 - The engine rules stay in force: no `$` across module boundaries, plugin modules have no Node/DOM/`process`, gating hooks fail closed, tool results are plain strings, refs are rebuilt after document loads.
 - The bridge owns all pixel work; the plugin only maps cells to CSS pixels and hands image sources to the terminal.
-- Engine `Image` payload limits are hard: at most 2 MiB decoded for inline bytes, POSIX shared memory only on Linux/macOS, and inline bytes render only in the fullscreen layout.
+- Engine `Image` payload limits are hard: at most 2 MiB decoded for inline bytes, and inline bytes render only in the fullscreen layout.
 - Clicks follow the same tab; a `target="_blank"` target that opens a second tab is out of scope (0.4).
 - Every phase ships its tests and docs; the maintainer runs `npm test` and commits. The release cuts `0.3.0` and moves the Unreleased entries into it.
 
@@ -60,25 +60,28 @@ Date: 2026-11-08
 - Manual: motion interval ≤ 250 ms; idle CPU under 5%; disk holds one live frame plus one still, never a growing set.
 - `npm test` green.
 
-## Phase F3 — Terminal coverage and zero-copy sources
+## Phase F3 — Terminal coverage and inline image sources
 
-**Why:** hq works only where the terminal reads a PNG path itself. iTerm2 needs inline bytes, tmux needs passthrough, and Linux/macOS can skip base64 entirely through shared memory.
+**Why:** hq works only where the terminal reads a PNG path itself. iTerm2 needs inline bytes, and tmux needs passthrough.
 
-**Expected result:** iTerm2 3.5+ and tmux show hq; POSIX hosts stream via `/dev/shm`; unsupported terminals still get the text tier plus a one-line reason.
+**Expected result:** iTerm2 3.5+ and tmux show hq through inline PNG bytes; file-source terminals keep the current path; unsupported terminals still get the text tier plus a one-line reason.
 
 **Implementation:**
 
-1. `Frame` becomes a discriminated union: `{ kind: 'file', path, format }`, `{ kind: 'shm', path, width, height }` or `{ kind: 'png', data }`.
-2. Bridge writes a fresh raw `rgb` object under `/dev/shm` per frame (the engine unlinks it when read) and returns `shm`; the pane maps it to an `Image` `shm` source. Windows keeps file/png sources.
+1. `Frame` becomes a discriminated union: `{ kind: 'file', file, ... }` or `{ kind: 'png', data, ... }`, sharing generation, columns, rows, pageWidth, pageHeight, pixelWidth and pixelHeight. The provider methods take a `FrameSource` (`'file' | 'png'`).
+2. Bridge: `POST /frame` takes `source` (default `file`); png returns the base64 capture and writes no file. The screencast remembers the requested source: png keeps the newest bytes in `liveFrame`, writes no `live.png`, and still prunes/clears as today. File mode is unchanged.
 3. iTerm2/tmux use an inline `png` source, downscaled until the decoded payload is under 2 MiB; document that both need fullscreen rendering and tmux needs `allow-passthrough` and `focus-events`.
-4. `detectImageTier` grows iTerm2 and tmux-with-passthrough cases (tmux is allowed only when the outer program is kitty, Ghostty, WezTerm or iTerm2, with a notice naming the required tmux options); Windows Terminal stays on the text tier.
-5. Contract and provider guide describe all three source kinds.
+4. `detectImageTier` returns `{ supported, source, reason }`; tmux is allowed only when the outer program is kitty, Ghostty, WezTerm or iTerm2, with a notice naming the required tmux options; Windows Terminal stays on the text tier.
+5. Contract and provider guide describe both source kinds.
+
+**Dropped: POSIX shared memory (`/dev/shm`).** CDP has no raw-pixel output: `Page.captureScreenshot` and `Page.screencastFrame` produce only PNG/JPEG/WebP. A shm source would therefore require decoding every frame in the page and writing tens of megabytes per raw frame — a 1600×1920 frame is about 9 MiB raw, while the same PNG is usually under 2 MiB — which is strictly worse than the PNG path it would replace. The shm item is removed rather than deferred; inline PNG covers the terminals it was meant for. Shared memory moves to out of scope.
 
 **Acceptance:**
 
-- Unit tests for tier detection across term/env combinations.
-- Bridge test: shm output exists outside the temp dir, is the expected byte length, and is removed on stop; inline payload stays under the cap.
-- Manual: hq on iTerm2 and inside tmux with passthrough; no leftovers in `/dev/shm`.
+- Unit tests for tier detection across term/env combinations, including tmux.
+- Bridge test: `source: 'png'` returns base64 PNG bytes (IHDR readable), writes no file, and `GET /frame?since` follows the remembered source; file mode unchanged.
+- Plugin test: iTerm2 and tmux+iTerm2 draw a png source; WezTerm keeps the file source; Windows Terminal stays text with the notice; an oversized png lowers detail and then falls back with a notice.
+- Manual: hq on iTerm2 and inside tmux with passthrough.
 - `npm test` green.
 
 ## Phase S1 — Click-driven navigation cannot escape the allowlist
@@ -127,12 +130,12 @@ Interactive third-party providers (Minecraft, LINE) move to 0.4.
 1. `once`-policy end-to-end test through the hub (currently only unit-tested in `tests/permissions.test.ts`).
 2. Refresh the README roadmap, the provider guide's action list, and the "known limitations"; document `hqDetail`, tmux/iTerm2 setup and occlusion behaviour. Make the tool descriptions provider-neutral (they currently say `browser_*` and describe DOM-only actions).
 3. Add a remote, a marketplace install line with the real `owner/repo`, and CI: typecheck, `validate` and plugin tests on every push; bridge tests on a Windows runner with Chrome.
-4. Extend the `docs/SECURITY.md` release checklist: screencast acknowledgement, `/dev/shm` cleanup, inline-payload cap, escaped-navigation audit.
+4. Extend the `docs/SECURITY.md` release checklist: screencast acknowledgement, inline-payload cap, escaped-navigation audit.
 5. Cut `0.3.0`: move Unreleased, bump `plugin.json` and `package.json`, tag.
 
 ## Verification matrix
 
-`npm test` per phase, the phase tests above, and a manual session on WezTerm with `CLAUDE_CODE_NO_FLICKER=1`. Frame interval, idle CPU, capture bytes and `/dev/shm` leftovers are measured from `.tmp` scripts and deleted afterwards.
+`npm test` per phase, the phase tests above, and a manual session on WezTerm with `CLAUDE_CODE_NO_FLICKER=1`. Frame interval, idle CPU and capture bytes are measured from `.tmp` scripts and deleted afterwards.
 
 ## Sequencing
 
@@ -162,3 +165,4 @@ Residual risks:
 - Mobile surfaces, multi-provider focus, resource quotas.
 - Third-party provider distribution.
 - Video or canvas-specific capture beyond the generic screencast.
+- POSIX shared-memory frame sources (`/dev/shm`): CDP emits no raw pixels, so the bridge would have to decode every frame and write far more than the PNG path it replaces. Dropped from F3; inline PNG is the source for terminals that cannot read a path.

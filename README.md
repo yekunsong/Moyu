@@ -71,7 +71,7 @@ Moving the window into the terminal is a side effect. The product is **structure
 - **Provider framework, proven by a second adapter.** Capability negotiation, allowlists, the queue and auditing live in the hub; the browser is one adapter and the read-only `reader` is another. The hub imports no provider code and refuses actions a provider's capabilities lack.
 - **Permissioned by default.** http(s)-only navigation, host allowlist (`localhost` always), model writes confirmed per action (or `once`/`auto`), exact-label approval, fail-closed confirmations. A link click or `clickAt` preflights its destination before the click, and a page-script navigation to an unlisted host raises an audited `escaped` warning with **back** and **allow host**.
 - **Audited.** Human and model actions land in the same ring buffer and in `$.store`; fill text is redacted.
-- **Three rendering tiers.** Text (buttons, inputs and sections, any terminal), colored cells (half-block Raster, 24-bit color) and HQ images (real PNG frames on kitty, Ghostty, WezTerm). Degrades to a summary line in narrow panes.
+- **Three rendering tiers.** Text (buttons, inputs and sections, any terminal), colored cells (half-block Raster, 24-bit color) and HQ images (real PNG frames on kitty, Ghostty, WezTerm and iTerm2 3.5+, and inside tmux via passthrough). Degrades to a summary line in narrow panes.
 - **Inline editing and structure.** Text fields and selects edit in place; rows group under page headings with a status bar and block navigation.
 - **Crash-isolated and portable.** A supervised local bridge owns headless Chromium; health checks, backoff restarts, idle shutdown, process-tree cleanup, Linux/macOS discovery and WSL-verified tests.
 - **Attach mode.** `/transom attach <port>` mirrors a Chrome you already run, with its logins, and detaches without closing it.
@@ -169,7 +169,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 - Clicking a row executes immediately (a person can see the page); a row that links to a host outside the allowlist asks first, for a person and for the model. Model writes are confirmed according to `writePolicy`.
 - Text fields and selects are edited inline: type and press Enter, or pick an option; no dialog.
 - Rows are grouped under page headings with a fixed status bar; `↓ next block` scrolls the page when the snapshot is longer than the pane.
-- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm) streamed from Chrome and polled every 250 ms while the pane has focus (1 s otherwise), and clicking the picture clicks the page; both return to text with another press. When the stream has been still for ~2 seconds the pane takes one sharp still at `hqDetail`, and motion resumes the cheap stream. hq renders at a desktop width and physical pixel density (see `hqDetail`), so entering it changes the viewport and leaves the visible snapshot stale until the next refresh.
+- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame streamed from Chrome and polled every 250 ms while the pane has focus (1 s otherwise), and clicking the picture clicks the page; both return to text with another press. kitty, Ghostty and WezTerm read a PNG path themselves; iTerm2 3.5+ and tmux take the same PNG inline, which requires the fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`), and tmux also needs `set -g allow-passthrough on` and `set -g focus-events on`. When the stream has been still for ~2 seconds the pane takes one sharp still at `hqDetail`, and motion resumes the cheap stream. hq renders at a desktop width and physical pixel density (see `hqDetail`), so entering it changes the viewport and leaves the visible snapshot stale until the next refresh.
 - Click the keyboard strip to forward keys to the page; Esc returns them to the prompt.
 - Panes narrower than 48 columns show a degradation notice.
 
@@ -182,7 +182,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 | `allowedHosts` | `localhost,127.0.0.1` | Comma-separated hosts; localhost is always allowed. Wildcards: `*.example.org`. Session grants from `/transom allow` / `/transom deny` override this for the current session. |
 | `writePolicy` | `confirm` | `confirm` (each write), `once` (first write per session; submits still confirmed), `auto` |
 | `snapshotMaxChars` | `12000` | Hard character cap on a snapshot handed to the model |
-| `hqDetail` | `2` | hq still density: `1` fast, `2` default, `3` sharp. The stream uses the density of the frame that opened image mode; the sharp still taken on a quiet page uses this value. Higher detail costs CPU and disk; captures are capped at 3840×2560. |
+| `hqDetail` | `2` | hq still density: `1` fast, `2` default, `3` sharp. The stream uses the density of the frame that opened image mode; the sharp still taken on a quiet page uses this value. Higher detail costs CPU and disk; captures are capped at 3840×2560. Inline sources (iTerm2, tmux) also cap the decoded payload at 2 MiB: the pane first retries at detail 1, and a page that still does not fit stays in text mode with a notice. |
 
 ## Architecture
 
@@ -281,7 +281,7 @@ Measured on Claude Code 2.1.319, local, interactive terminal.
 |---|---|---|---|
 | Text | Text, links, form structure, colored | Low | Shipped |
 | Colored cells | Raster downscale, 24-bit color, clickable by row | Medium | Shipped (`visual`) |
-| Images (HQ) | `Image` with a PNG file source; kitty, Ghostty, WezTerm | Medium | Shipped (`hq`), streamed |
+| Images (HQ) | `Image` with a PNG file source (kitty, Ghostty, WezTerm) or inline PNG bytes (iTerm2 3.5+, tmux) | Medium | Shipped (`hq`), streamed |
 
 The color is real 24-bit foreground/background, not monochrome. Cells are still an image, not the thing itself: small type blurs and rounded shadows disappear. HQ frames are captured at 1–3× density and can be 1–4 MB each.
 
@@ -293,7 +293,7 @@ The color is real 24-bit foreground/background, not monochrome. Cells are still 
 - **Headless Chrome only:** no logged-in profile by default; no extensions, no audio, no tabs.
 - **No JS-rendered canvas semantics:** canvas content participates as an image, not as nodes.
 - **Raster is manual:** `visual` repaints on demand; `hq` streams via Chrome's screencast (250 ms poll while focused, 1 s otherwise) and takes one sharp still when the page is idle.
-- **HQ terminals:** `hq` needs a terminal that reads a PNG path itself (kitty, Ghostty, WezTerm); iTerm2, tmux and Windows Terminal stay on the text tier.
+- **HQ terminals:** `hq` needs a terminal that reads a PNG path itself (kitty, Ghostty, WezTerm) or takes inline PNG bytes (iTerm2 3.5+, tmux with `allow-passthrough` and `focus-events`). Inline rendering requires the fullscreen layout; Windows Terminal stays on the text tier.
 - **Dialogs:** `alert` is accepted, `confirm`/`prompt` are dismissed so a page never blocks; the dialog is recorded in `/health` and the action message.
 
 ## Development

@@ -351,6 +351,7 @@ test('hq draws an Image from the frame file on WezTerm', async ($, on) => {
   expect(await ui.find({ type: 'Button', key: 'hq' }), 'hq button').toBeDefined()
   await ui.press({ key: 'hq' })
   expect(bottom.fetches.some(one => one.endsWith('/frame')), '/frame fetched').toBe(true)
+  expect(bottom.frameBodies[0]?.source, 'file source requested').toBe('file')
 
   const image = await ui.find({ type: 'Image', key: 'frame' })
   expect(image, 'Image key frame').toBeDefined()
@@ -371,6 +372,141 @@ test('hq draws an Image from the frame file on WezTerm', async ($, on) => {
   expect(await ui.find({ type: 'Image', key: 'frame' })).toBeUndefined()
   await bottom.advance(1)
   expect(bottom.fetches.some(one => one.endsWith('/frame/stop')), 'viewport restored').toBe(true)
+  await ui.unmount()
+})
+
+test('hq draws an inline png on iTerm2', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'iTerm.app' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  expect(await ui.find({ type: 'Button', key: 'hq' }), 'hq button').toBeDefined()
+  await ui.press({ key: 'hq' })
+  expect(bottom.frameBodies[0]?.source, 'inline source requested').toBe('png')
+  const image = await ui.find({ type: 'Image', key: 'frame' })
+  expect(image, 'Image key frame').toBeDefined()
+  const source = image?.props.source as { png?: string; file?: string }
+  expect(source.png, 'inline png bytes').toBeTruthy()
+  expect(source.file, 'no file source').toBeUndefined()
+  // The stream keeps the inline shape, so a polled frame is still a png source.
+  bottom.pushFrame()
+  await bottom.advance(1000)
+  const streamed = await ui.find({ type: 'Image', key: 'frame' })
+  expect((streamed?.props.source as { png?: string }).png, 'streamed png').toBeTruthy()
+  await ui.unmount()
+})
+
+test('hq inside tmux with iTerm2 draws an inline png', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'iTerm.app', TMUX: '/tmp/tmux-1000/default,42,0' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  expect(await ui.find({ type: 'Button', key: 'hq' }), 'hq button inside tmux').toBeDefined()
+  await ui.press({ key: 'hq' })
+  expect(bottom.frameBodies[0]?.source).toBe('png')
+  const image = await ui.find({ type: 'Image', key: 'frame' })
+  expect(image, 'Image key frame').toBeDefined()
+  expect((image?.props.source as { png?: string }).png, 'inline png').toBeTruthy()
+  await ui.unmount()
+})
+
+test('an oversized inline png is retried at detail 1 before giving up', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'iTerm.app' } })
+  bottom.pngBytesAtDetail = detail => (detail === 1 ? 1024 : 3 * 1024 * 1024)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'hq' })
+
+  expect(bottom.frameBodies.length, 'one retry').toBe(2)
+  expect(bottom.frameBodies[0]?.detail).toBe(2)
+  expect(bottom.frameBodies[1]?.detail).toBe(1)
+  expect(bottom.frameBodies[1]?.source).toBe('png')
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'image after lowering detail').toBeDefined()
+  await ui.unmount()
+})
+
+test('an inline png over 2 MiB at detail 1 stays in text mode with a notice', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'iTerm.app' } })
+  bottom.pngBytes = 3 * 1024 * 1024
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'hq' })
+
+  expect(bottom.frameBodies.map(body => body.detail), 'default then detail 1').toEqual([2, 1])
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'no image drawn').toBeUndefined()
+  const notice = await ui.find({ type: 'Text', text: /2 MiB/ })
+  expect(notice, 'fallback notice').toBeDefined()
+  expect(notice?.text ?? '').toContain('text mode')
+  await ui.unmount()
+})
+
+test('a streamed inline frame over the cap falls back to stills at detail 1', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'iTerm.app' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: { ...PANE, isFocused: true },
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'hq' })
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'image mode').toBeDefined()
+  const posts = bottom.frameBodies.length
+
+  // The next streamed frame outgrows the engine's inline limit; the pane keeps
+  // the last picture and returns to stills, re-checked at detail 1.
+  bottom.pngBytesAtDetail = detail => (detail === 1 ? 1024 : 3 * 1024 * 1024)
+  bottom.pushFrame()
+  await bottom.advance(250)
+  for (let index = 0; index < 4; index += 1) await bottom.advance(250)
+  expect(bottom.frameBodies.length, 'a still was taken').toBeGreaterThan(posts)
+  expect(bottom.frameBodies.at(-1)?.detail, 'detail lowered').toBe(1)
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'still in image mode').toBeDefined()
   await ui.unmount()
 })
 

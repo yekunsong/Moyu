@@ -34,18 +34,33 @@ export function detectTmux(): boolean {
 
 export type ImageTier = {
   supported: boolean
+  /** How frames reach the terminal: a PNG path it reads, or inline bytes. */
+  source: 'file' | 'png'
   reason: string
 }
 
 const IMAGE_PROGRAMS = new Set(['wezterm', 'ghostty', 'kitty'])
+const TMUX_OPTIONS = '`set -g allow-passthrough on` and `set -g focus-events on`'
+
+/** Whether this terminal (term + program names, lowercased) reads a PNG path. */
+function fileProgram(termName: string, programName: string): boolean {
+  return termName.includes('kitty') || termName.includes('ghostty') || termName.includes('wezterm') || IMAGE_PROGRAMS.has(programName)
+}
+
+/** Whether this program can show inline PNG bytes (iTerm2 3.5+). */
+function inlineProgram(termName: string, programName: string): boolean {
+  return programName === 'iterm.app' || termName.includes('iterm')
+}
 
 /**
- * Whether this terminal can draw an `Image` from a file source.
+ * Whether this terminal can draw an `Image`, and how.
  *
- * B1 supports only terminals that read a PNG path themselves: kitty, Ghostty
- * and WezTerm. iTerm2 needs inline bytes (planned for B2), and tmux and
- * Windows Terminal cannot show the picture at all. The env names are read by
- * the `Ops` literal, so the validator sees each string at its call site.
+ * File source: kitty, Ghostty and WezTerm read a PNG path themselves; tmux
+ * blocks that protocol, so inside tmux only inline bytes are offered. Inline
+ * PNG: iTerm2 3.5+, and tmux when the outer program is one of those four (the
+ * person opts in by enabling tmux passthrough and focus events). Windows
+ * Terminal and unknown terminals stay on the text tier. The env names are read
+ * by the `Ops` literal, so the validator sees each string at its call site.
  */
 export async function detectImageTier(ops: Ops): Promise<ImageTier> {
   const [term, program, wt, tmux] = await Promise.all([
@@ -54,25 +69,38 @@ export async function detectImageTier(ops: Ops): Promise<ImageTier> {
     ops.env.wtSession(),
     ops.env.tmux(),
   ])
-  if (tmux) {
-    return { supported: false, reason: 'tmux blocks the terminal image protocol; use a direct terminal for hq' }
-  }
-  if (wt) {
-    return { supported: false, reason: 'Windows Terminal cannot draw images; kitty, Ghostty or WezTerm is required' }
-  }
   const termName = (term ?? '').toLowerCase()
   const programName = (program ?? '').toLowerCase()
-  if (termName.includes('kitty') || termName.includes('ghostty') || IMAGE_PROGRAMS.has(programName)) {
-    return { supported: true, reason: '' }
+  if (tmux) {
+    // tmux cannot be probed without a process; keep the name it inherits.
+    if (fileProgram(termName, programName) || inlineProgram(termName, programName)) {
+      return {
+        supported: true,
+        source: 'png',
+        reason: `tmux inline images need ${TMUX_OPTIONS}`,
+      }
+    }
+    return {
+      supported: false,
+      source: 'png',
+      reason: `tmux needs the outer terminal to be kitty, Ghostty, WezTerm or iTerm2 3.5+, with ${TMUX_OPTIONS}`,
+    }
   }
-  if (programName === 'iterm.app' || termName.includes('iterm')) {
-    return { supported: false, reason: 'iTerm2 needs an inline image payload, which this version does not send' }
+  if (wt) {
+    return { supported: false, source: 'file', reason: 'Windows Terminal cannot draw images; kitty, Ghostty, WezTerm or iTerm2 3.5+ is required' }
+  }
+  if (fileProgram(termName, programName)) {
+    return { supported: true, source: 'file', reason: '' }
+  }
+  if (inlineProgram(termName, programName)) {
+    return { supported: true, source: 'png', reason: '' }
   }
   const named = program || term
   return {
     supported: false,
+    source: 'file',
     reason: named
-      ? `terminal "${named}" cannot draw images; kitty, Ghostty or WezTerm is required`
-      : 'unknown terminal; kitty, Ghostty or WezTerm is required',
+      ? `terminal "${named}" cannot draw images; kitty, Ghostty, WezTerm or iTerm2 3.5+ is required`
+      : 'unknown terminal; kitty, Ghostty, WezTerm or iTerm2 3.5+ is required',
   }
 }

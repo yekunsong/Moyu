@@ -63,6 +63,10 @@ const FRAME_LIMIT = 10
 let liveFrame = null
 let screencastOn = false
 let screencastStarting = false
+// How the pane asked for frames: `file` writes a PNG path, `png` returns the
+// base64 bytes for terminals that take inline images. The screencast remembers
+// it so streamed frames come back in the same shape.
+let frameSource = 'file'
 // A target that refused the screencast once is not asked again until the pane
 // leaves image mode; the pane then falls back to one second stills.
 let screencastRefused = false
@@ -717,16 +721,9 @@ function handleScreencastFrame(params, sid) {
   if (!screencastOn || !frameDir || !params?.data) return
   const bytes = Buffer.from(params.data, 'base64')
   if (bytes.length < 24 || bytes.readUInt32BE(0) !== 0x89504e47) return
-  const file = join(frameDir, 'live.png')
-  try {
-    writeFileSync(file, bytes)
-  } catch {
-    return
-  }
   const metadata = params.metadata ?? {}
   frameGeneration += 1
-  liveFrame = {
-    file,
+  const metrics = {
     generation: frameGeneration,
     columns: frameBox.columns,
     rows: frameBox.rows,
@@ -738,6 +735,19 @@ function handleScreencastFrame(params, sid) {
     pixelWidth: bytes.readUInt32BE(16),
     pixelHeight: bytes.readUInt32BE(20),
   }
+  // Inline mode keeps the newest bytes in memory: no file is written, and the
+  // previous generation is dropped rather than accumulating.
+  if (frameSource === 'png') {
+    liveFrame = { kind: 'png', data: params.data, ...metrics }
+    return
+  }
+  const file = join(frameDir, 'live.png')
+  try {
+    writeFileSync(file, bytes)
+  } catch {
+    return
+  }
+  liveFrame = { kind: 'file', file, ...metrics }
 }
 
 // Started by the first POST /frame: the still is the reliable first frame, and
@@ -801,6 +811,8 @@ function liveFrameAnswer(url) {
 async function frame(request) {
   const columns = Math.max(20, Math.min(Number(request.cols) || VIEW_COLS, 200))
   const rows = Math.max(5, Math.min(Number(request.rows) || VIEW_ROWS, 120))
+  const source = request.source === 'png' ? 'png' : 'file'
+  frameSource = source
   let detail = detailOf(request.detail)
   let pageWidth = Math.max(columns * CELL_W, HQ_MIN_WIDTH)
   let pageHeight = Math.round((pageWidth * rows * CELL_H) / (columns * CELL_W))
@@ -837,6 +849,17 @@ async function frame(request) {
   const pixelWidth = bytes.readUInt32BE(16)
   const pixelHeight = bytes.readUInt32BE(20)
   frameGeneration += 1
+  const metrics = { generation: frameGeneration, columns, rows, pageWidth, pageHeight, pixelWidth, pixelHeight }
+  // Inline mode hands the capture straight back and writes no file: the pane
+  // puts the bytes in the terminal's image source instead of a path.
+  if (source === 'png') {
+    frameBox = { columns, rows, pageWidth, pageHeight }
+    await startScreencast(
+      owned ? pageWidth * detail : pixelWidth,
+      owned ? pageHeight * detail : pixelHeight,
+    )
+    return { kind: 'png', data: captured.data, ...metrics }
+  }
   const file = join(frameDir, `f${frameGeneration}.png`)
   writeFileSync(file, bytes)
   frameFiles.push(file)
@@ -856,7 +879,7 @@ async function frame(request) {
   const maxWidth = owned ? pageWidth * detail : pixelWidth
   const maxHeight = owned ? pageHeight * detail : pixelHeight
   await startScreencast(maxWidth, maxHeight)
-  return { file, generation: frameGeneration, columns, rows, pageWidth, pageHeight, pixelWidth, pixelHeight }
+  return { kind: 'file', file, ...metrics }
 }
 
 // Leaving image mode stops the stream, drops the rolling frame and returns the

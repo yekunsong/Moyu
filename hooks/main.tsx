@@ -22,13 +22,15 @@ let lastShot: { key: string; cells: string; columns: number; rows: number; url: 
   url: '',
 }
 
-// The HQ image tier: a file path the terminal reads itself. Chrome streams
-// frames into one rolling file and the pane polls for a newer generation every
-// 250 ms while focused (1 s otherwise); a still page gets one sharp capture.
-// Like lastShot, it lives in a module variable rather than state: a reload
-// drops it and the pane falls back to text.
+// The HQ image tier: a frame source the terminal draws. File terminals get a
+// PNG path; iTerm2 and tmux get inline PNG bytes. Chrome streams frames and the
+// pane polls for a newer generation every 250 ms while focused (1 s otherwise);
+// a still page gets one sharp capture. Like lastShot, it lives in a module
+// variable rather than state: a reload drops it and the pane falls back to text.
 let lastFrame: {
+  kind: 'file' | 'png'
   file: string
+  data: string
   generation: number
   columns: number
   rows: number
@@ -36,7 +38,9 @@ let lastFrame: {
   pageHeight: number
   url: string
 } = {
+  kind: 'file',
   file: '',
+  data: '',
   generation: 0,
   columns: 0,
   rows: 0,
@@ -44,7 +48,12 @@ let lastFrame: {
   pageHeight: 0,
   url: '',
 }
-let imageTier: ImageTier = { supported: false, reason: '' }
+let imageTier: ImageTier = { supported: false, source: 'file', reason: '' }
+// The engine takes at most 2 MiB of decoded inline bytes. A png frame that
+// oversizes this is retried at detail 1; if it still does not fit, the pane
+// stays in text mode with a notice.
+const INLINE_MAX_BYTES = 2 * 1024 * 1024
+let frameDetailOverride: number | undefined
 let frameTimer: Timer | undefined
 let frameBusy = false
 let frameActive = false
@@ -95,6 +104,18 @@ function clip(text: string, width: number): string {
 function clickPixel(cell: number, cells: number, pixels: number): number {
   const raw = cells > 0 ? Math.round(((cell + 0.5) / cells) * pixels) : 0
   return Math.max(0, Math.min(raw, Math.max(0, Math.round(pixels) - 1)))
+}
+
+/** Whether a frame fits the engine's 2 MiB inline limit (file frames always do). */
+function withinInlineCap(frame: Frame): boolean {
+  return inlineBytes(frame) <= INLINE_MAX_BYTES
+}
+
+/** Exact decoded bytes of an inline PNG frame; 0 for a file frame (no payload). */
+function inlineBytes(frame: Frame): number {
+  if (frame.kind !== 'png') return 0
+  const padding = frame.data.endsWith('==') ? 2 : frame.data.endsWith('=') ? 1 : 0
+  return Math.floor((frame.data.length * 3) / 4) - padding
 }
 
 /** A session host argument: a bare hostname or an http(s) URL. */
@@ -180,10 +201,10 @@ export const register: Register = (on, options) => {
     try {
       imageTier = await detectImageTier(ops)
     } catch {
-      imageTier = { supported: false, reason: 'terminal detection failed' }
+      imageTier = { supported: false, source: 'file', reason: 'terminal detection failed' }
     }
     stopFrames()
-    lastFrame = { file: '', generation: 0, columns: 0, rows: 0, pageWidth: 0, pageHeight: 0, url: '' }
+    lastFrame = { kind: 'file', file: '', data: '', generation: 0, columns: 0, rows: 0, pageWidth: 0, pageHeight: 0, url: '' }
     void hub!.start().catch(error => {
       ops.log(`provider start: ${String((error as Error).message ?? error)}`)
     })
@@ -263,7 +284,7 @@ export const register: Register = (on, options) => {
 
     if (verb === 'close') {
       stopFrames()
-      lastFrame = { file: '', generation: 0, columns: 0, rows: 0, pageWidth: 0, pageHeight: 0, url: '' }
+      lastFrame = { kind: 'file', file: '', data: '', generation: 0, columns: 0, rows: 0, pageWidth: 0, pageHeight: 0, url: '' }
       await transom.close()
       await ops.closePane(PANE)
       stopDemo()
@@ -275,14 +296,15 @@ export const register: Register = (on, options) => {
       try {
         imageTier = await detectImageTier(ops)
       } catch {
-        imageTier = { supported: false, reason: 'terminal detection failed' }
+        imageTier = { supported: false, source: 'file', reason: 'terminal detection failed' }
       }
       if (!imageTier.supported) return { text: `hq unavailable: ${imageTier.reason}` }
       await showPane(ops)
       const started = await startImage($, ops, transom, transom.provider.meta.defaultWidth, 24)
+      const note = imageTier.reason ? ` (${imageTier.reason})` : ''
       return {
         text: started
-          ? 'hq on: the pane shows the real page, read-only. /transom hq again or text mode to edit.'
+          ? `hq on: the pane shows the real page, read-only. /transom hq again or text mode to edit.${note}`
           : 'hq could not capture a frame; the pane stays in text mode.',
       }
     }
@@ -424,8 +446,8 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         <Text bold>Transom · {model.title || 'no page'}</Text>
         <Text dimColor>{model.url || 'open a URL with /transom open <url> · local hosts only by default'}</Text>
-        {!imageTier.supported && imageTier.reason && model.rows.length === 0 ? (
-          <Text dimColor>hq unavailable: {imageTier.reason}</Text>
+        {imageTier.reason && model.rows.length === 0 ? (
+          <Text dimColor>{imageTier.supported ? `hq: ${imageTier.reason}` : `hq unavailable: ${imageTier.reason}`}</Text>
         ) : null}
         {e.props.placement === 'inline' ? (
           <Text dimColor>mouse needs fullscreen: CLAUDE_CODE_NO_FLICKER=1 · keyboard: ctrl+x tab</Text>
@@ -559,7 +581,7 @@ export const register: Register = (on, options) => {
       )
     }
 
-    if (model.mode === 'image' && lastFrame.file) {
+    if (model.mode === 'image' && (lastFrame.kind === 'png' ? lastFrame.data : lastFrame.file)) {
       const frameRows = Math.max(5, rows - 9)
       return (
         <Box flexDirection="column" width="100%">
@@ -569,7 +591,11 @@ export const register: Register = (on, options) => {
           <Box position="relative" width={width} height={frameRows}>
             <Image
               key="frame"
-              source={{ file: lastFrame.file, format: 'png', generation: lastFrame.generation }}
+              source={
+                lastFrame.kind === 'png'
+                  ? { png: lastFrame.data }
+                  : { file: lastFrame.file, format: 'png', generation: lastFrame.generation }
+              }
               columns={width}
               rows={frameRows}
               alt="page screenshot"
@@ -740,6 +766,7 @@ function stopFrames(): void {
   frameFocused = false
   frameSharpTaken = false
   frameBusy = false
+  frameDetailOverride = undefined
   // Image mode changes the owned page's viewport; going back to text puts the
   // cell-box metrics back so snapshots match the pane again.
   if (frameMetricsHeld) {
@@ -786,10 +813,27 @@ async function startImage(
     columns: Math.max(1, Math.floor(width)),
     rows: Math.max(5, Math.floor(rows) - 9),
   }
+  // The tier decides how frames travel before the first one is requested.
+  transom.setFrameSource(imageTier.source)
   let frame: Frame
   frameMetricsHeld = true
+  frameDetailOverride = undefined
   try {
     frame = await transom.frame(frameSize.columns, frameSize.rows)
+    // Inline bytes are capped at 2 MiB decoded by the engine. Spend less
+    // density first; a page that still does not fit stays in text mode.
+    if (inlineBytes(frame) > INLINE_MAX_BYTES) {
+      frame = await transom.frame(frameSize.columns, frameSize.rows, 1)
+      frameDetailOverride = 1
+      if (inlineBytes(frame) > INLINE_MAX_BYTES) {
+        stopFrames()
+        const notice = 'hq: the inline frame exceeds 2 MiB even at detail 1; staying in text mode'
+        ops.toast(notice)
+        await update($, view, model => ({ ...model, mode: 'text' as const, last: notice }))
+        void $.ui.invalidate('ui.render')
+        return false
+      }
+    }
   } catch (error) {
     stopFrames()
     ops.toast(`hq: ${String((error as Error).message ?? error)}`)
@@ -855,6 +899,14 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
         return
       }
       const frame = answer as Frame
+      if (!withinInlineCap(frame)) {
+        // The stream grew past the engine's inline limit; keep the last good
+        // picture and return to cheap stills, re-checked at detail 1.
+        frameStreaming = false
+        frameDetailOverride = 1
+        frameFailures = 0
+        return
+      }
       frameFailures = 0
       frameSharpTimer?.cancel()
       frameSharpTimer = undefined
@@ -863,7 +915,15 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
       void $.ui.invalidate('ui.render')
       return
     }
-    const frame = await transom.frame(frameSize.columns, frameSize.rows)
+    const frame = await transom.frame(frameSize.columns, frameSize.rows, frameDetailOverride)
+    if (!withinInlineCap(frame)) {
+      stopFrames()
+      const notice = 'hq: the inline frame exceeds 2 MiB even at detail 1; staying in text mode'
+      ops.toast(notice)
+      await update($, view, model => ({ ...model, mode: 'text' as const, last: notice }))
+      void $.ui.invalidate('ui.render')
+      return
+    }
     frameFailures = 0
     applyFrame(frame, transom)
     void $.ui.invalidate('ui.render')
@@ -887,7 +947,9 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
 
 function applyFrame(frame: Frame, transom: Hub): void {
   lastFrame = {
-    file: frame.file,
+    kind: frame.kind,
+    file: frame.kind === 'file' ? frame.file : '',
+    data: frame.kind === 'png' ? frame.data : '',
     generation: frame.generation,
     columns: frame.columns,
     rows: frame.rows,
@@ -913,7 +975,10 @@ async function takeSharpStill($: EngineInterface, transom: Hub): Promise<void> {
   frameBusy = true
   frameMetricsHeld = true
   try {
-    const frame = await transom.frame(frameSize.columns, frameSize.rows)
+    const frame = await transom.frame(frameSize.columns, frameSize.rows, frameDetailOverride)
+    // A sharp still that outgrows the inline cap is skipped; the streamed
+    // picture stays on screen and the next quiet poll tries again.
+    if (!withinInlineCap(frame)) return
     frameSharpTaken = true
     frameFailures = 0
     applyFrame(frame, transom)

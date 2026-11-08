@@ -24,8 +24,8 @@ type Provider = {
   act(action: Action, context: { actor: 'person' | 'model' }): Promise<ActResult>
   screenshot?(cols: number, rows: number): Promise<{ pngBase64: string; cols: number; rows: number }>
   raster?(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
-  frame?(cols: number, rows: number, detail?: number): Promise<Frame>
-  latestFrame?(since: number): Promise<FramePoll>
+  frame?(cols: number, rows: number, detail?: number, source?: FrameSource): Promise<Frame>
+  latestFrame?(since: number, source?: FrameSource): Promise<FramePoll>
   stopFrame?(): Promise<void>
   hitAt?(x: number, y: number): Promise<Hit>
 }
@@ -86,6 +86,15 @@ Do not assume Node, DOM or a PTY inside the plugin module. `spawn` stdin is one-
 ## 4. Rendering
 
 For the text tier, returning `SnapshotNode[]` is enough: `projectRows` in `hooks/main.tsx` turns it into buttons, inputs and text. Without `pointer`, interactive rows render as plain text. The visual tier is optional: implement `raster()` returning base64 of `columns * rows` u32 triplets `[codePoint, foreground, background]`. `frame()` and `latestFrame()` are the image tier.
+
+`FrameSource` is `'file' | 'png'` and `Frame` is a discriminated union, both sharing `generation`, the cell box (`columns`, `rows`), the CSS mapping size (`pageWidth`, `pageHeight`) and the PNG pixel size (`pixelWidth`, `pixelHeight`):
+
+```ts
+type Frame = FrameMetrics &
+  ({ kind: 'file'; file: string } | { kind: 'png'; data: string })
+```
+
+`file` is an absolute PNG path the terminal reads itself (kitty, Ghostty, WezTerm). `png` is the whole PNG as base64 for terminals that take inline bytes (iTerm2 3.5+, tmux with passthrough); the pane keeps it under the engine's 2 MiB decoded limit before drawing. `source` names the shape the caller wants; the streamed answer follows it. A frame provider with only one shape may ignore the parameter and return that kind.
 
 ## 5. Tool result shape (measured)
 

@@ -71,7 +71,7 @@ Transom 把外部应用压成一对接口——`snapshot()` 读结构化状态�
 - **由第二个适配器证明的 Provider 框架。** 能力协商、白名单、队列与审计都在 hub；浏览器只是一个适配器，只读的 `reader` 是另一个。hub 不导入任何 provider 代码，并拒绝 provider 能力缺少的动作。
 - **默认受权限约束。** 只允许 http(s)、主机白名单（localhost 恒允许）、模型写操作逐次确认（或 `once`/`auto`）、只接受精确的 Allow 标签、失败即拒绝。点击链接与 `clickAt` 会在点击前预检目标；页面脚本自行跳到白名单外主机时，会显示带 **back** 与 **allow host** 的 `escaped` 警告并入审计。
 - **全量审计。** 人与模型动作进同一环形缓冲并持久化到 `$.store`；填写内容脱敏。
-- **三档渲染。** 文本档（按钮、输入框、分区，任何终端）、彩色格档（半格块 Raster，24 位色）与 HQ 图像档（kitty、Ghostty、WezTerm 上的真实 PNG 画面）；窄面板降级为摘要行。
+- **三档渲染。** 文本档（按钮、输入框、分区，任何终端）、彩色格档（半格块 Raster，24 位色）与 HQ 图像档（kitty、Ghostty、WezTerm 与 iTerm2 3.5+ 上的真实 PNG 画面，tmux 内经 passthrough 亦可）；窄面板降级为摘要行。
 - **行内编辑与结构。** 文本框和下拉框原地编辑；行按页面标题分区，带状态栏与分块翻页。
 - **崩溃隔离且可移植。** 受监督的本地 bridge 独占无头 Chromium；健康检查、退避重启、空闲自停、进程树清理、Linux/macOS 浏览器发现，测试已在 WSL 验证。
 - **接管模式。** `/transom attach <port>` 镜像你已运行的 Chrome（连同登录态），关闭时只断开、不退出浏览器。
@@ -169,7 +169,7 @@ reader 与浏览器共用同一套主机白名单、队列与审计，但从不�
 - 点击一行立即执行（人看得到页面）；指向白名单外主机的链接行会先确认，人和模型都一样。模型写操作按 `writePolicy` 确认。
 - 文本框与下拉框可直接在行内编辑：输入后回车，或选择选项，不再弹窗。
 - 行按页面标题分区，底部有固定状态栏；快照超长时用 `↓ next block` 翻页。
-- `visual` 切彩色格档；`hq` 显示由 Chrome screencast 推流的真实 PNG 画面（kitty、Ghostty、WezTerm），面板获得焦点时每 250 ms 轮询一次（其余时间 1 秒一次），点击画面即点击页面；再按一次回文本档。画面静止约 2 秒后会补拍一张 `hqDetail` 密度的清晰静帧，恢复动态后回到低成本推流。hq 以桌面宽度和物理像素密度渲染（见 `hqDetail`），进入时会改变视口，当前快照要到下次刷新才更新。
+- `visual` 切彩色格档；`hq` 显示由 Chrome screencast 推流的真实 PNG 画面，面板获得焦点时每 250 ms 轮询一次（其余时间 1 秒一次），点击画面即点击页面；再按一次回文本档。kitty、Ghostty、WezTerm 自己读取 PNG 路径；iTerm2 3.5+ 与 tmux 接收同一张 PNG 的内联字节，需要全屏布局（`CLAUDE_CODE_NO_FLICKER=1`），tmux 还需 `set -g allow-passthrough on` 与 `set -g focus-events on`。画面静止约 2 秒后会补拍一张 `hqDetail` 密度的清晰静帧，恢复动态后回到低成本推流。hq 以桌面宽度和物理像素密度渲染（见 `hqDetail`），进入时会改变视口，当前快照要到下次刷新才更新。
 - 点击底部键盘条后，按键转发给页面；Esc 交还提示符。
 - 窄于 48 列显示降级提示。
 
@@ -182,7 +182,7 @@ reader 与浏览器共用同一套主机白名单、队列与审计，但从不�
 | `allowedHosts` | `localhost,127.0.0.1` | 逗号分隔的主机；localhost 恒允许。支持 `*.example.org` 通配。`/transom allow` 与 `/transom deny` 的会话授权会覆盖本项。 |
 | `writePolicy` | `confirm` | `confirm`（每次写）、`once`（会话内首次写；提交类动作仍确认）、`auto` |
 | `snapshotMaxChars` | `12000` | 交给模型的快照字符硬上限 |
-| `hqDetail` | `2` | hq 静帧密度：`1` 快、`2` 默认、`3` 清晰。推流沿用进入 image 模式那一帧的密度；页面静止后的清晰静帧按此值拍摄。越高越耗 CPU 与磁盘；截图上限 3840×2560。 |
+| `hqDetail` | `2` | hq 静帧密度：`1` 快、`2` 默认、`3` 清晰。推流沿用进入 image 模式那一帧的密度；页面静止后的清晰静帧按此值拍摄。越高越耗 CPU 与磁盘；截图上限 3840×2560。内联源（iTerm2、tmux）解码后还限制在 2 MiB：面板先降到 detail 1 重拍，仍放不下就停在文本档并提示。 |
 
 ## 架构
 
@@ -281,7 +281,7 @@ ref 必须来自应用自身的对象身份，不能是坐标或下标。ref 失
 |---|---|---|---|
 | 文本 | 文字、链接、表单结构，带色 | 低 | 已实现 |
 | 彩色格 | Raster 降采样、24 位色、按行可点 | 中 | 已实现（`visual`） |
-| 图像（HQ） | `Image` + PNG 文件源；kitty、Ghostty、WezTerm | 中 | 已实现（`hq`），推流刷新 |
+| 图像（HQ） | `Image` + PNG 文件源（kitty、Ghostty、WezTerm）或内联 PNG 字节（iTerm2 3.5+、tmux） | 中 | 已实现（`hq`），推流刷新 |
 
 颜色是真的 24 位前景/背景，不是黑白。但格子终究是“像”不是“是”：小字号会糊，圆角阴影会消失。HQ 画面按 1–3 倍密度捕获，每张可达 1–4 MB。
 
@@ -293,6 +293,7 @@ ref 必须来自应用自身的对象身份，不能是坐标或下标。ref 失
 - **仅无头 Chrome：** 默认无登录态、无扩展、无音频、无多标签。
 - **Canvas 无语义：** canvas 内容以图像参与，不是节点。
 - **Raster 为手动刷新：** `visual` 按需重绘；`hq` 通过 Chrome screencast 推流（有焦点时 250 ms 轮询，其余 1 秒），页面静止时补一张清晰静帧。
+- **HQ 终端：** `hq` 需要终端自己读取 PNG 路径（kitty、Ghostty、WezTerm），或接收内联 PNG 字节（iTerm2 3.5+，以及开启 `allow-passthrough` 与 `focus-events` 的 tmux）；内联渲染要求全屏布局，Windows Terminal 留在文本档。
 
 ## 开发
 

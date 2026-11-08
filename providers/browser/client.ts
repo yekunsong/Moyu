@@ -9,6 +9,7 @@ import type {
   Capabilities,
   Frame,
   FramePoll,
+  FrameSource,
   Hit,
   Provider,
   ProviderMeta,
@@ -107,18 +108,18 @@ export class BrowserProvider implements Provider {
     })
   }
 
-  async frame(cols: number, rows: number, detail = 2): Promise<Frame> {
+  async frame(cols: number, rows: number, detail = 2, source: FrameSource = 'file'): Promise<Frame> {
     const endpoint = await this.supervisor.ensure()
     return await fetchJson<Frame>(this.ops, `${endpoint.url}/frame`, endpoint.token, {
       method: 'POST',
-      body: { cols, rows, detail },
+      body: { cols, rows, detail, source },
     })
   }
 
-  async latestFrame(since: number): Promise<FramePoll> {
+  async latestFrame(since: number, source: FrameSource = 'file'): Promise<FramePoll> {
     const endpoint = await this.supervisor.ensure()
     const at = Math.max(0, Math.floor(Number(since) || 0))
-    return await fetchJson<FramePoll>(this.ops, `${endpoint.url}/frame?since=${at}`, endpoint.token)
+    return await fetchJson<FramePoll>(this.ops, `${endpoint.url}/frame?since=${at}&source=${source}`, endpoint.token)
   }
 
   async hitAt(x: number, y: number): Promise<Hit> {

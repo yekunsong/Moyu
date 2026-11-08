@@ -2,7 +2,7 @@
 // confirmation, audit, execution, refresh. Serial by construction.
 import { ask, storeGet, storeSet } from '../engine/adapter'
 import type { Ops } from '../engine/ops'
-import type { Action, ActResult, Capabilities, Frame, Hit, Provider, Snapshot } from '../engine/provider'
+import type { Action, ActResult, Capabilities, Frame, FramePoll, FrameSource, Hit, Provider, Snapshot } from '../engine/provider'
 import { Audit } from './audit'
 import { classify as classificationOf, configOf, decide, describeAction, grantMatches, hostAllowed, newGrant, type Config, type SessionGrant } from './permissions'
 
@@ -72,6 +72,8 @@ export class Hub {
   #view: ViewModel = { ...EMPTY_VIEW }
   #cols = 110
   #rows = 34
+  /** The pane's image source, chosen from terminal detection before a frame. */
+  #frameSource: FrameSource = 'file'
 
   constructor(private readonly ops: Ops, options: Record<string, unknown>, deps: HubOptions) {
     this.#factory = deps.providerFactory
@@ -496,9 +498,18 @@ export class Hub {
   }
 
   /** Capture an HQ frame at the configured density; the pane maps clicks by CSS size. */
-  async frame(cols: number, rows: number): Promise<Frame> {
+  async frame(cols: number, rows: number, detail?: number): Promise<Frame> {
     if (!this.provider.frame) throw new Error(`the ${this.provider.meta.label} provider has no image capture`)
-    return await this.provider.frame(cols, rows, this.config.hqDetail)
+    return await this.provider.frame(cols, rows, detail ?? this.config.hqDetail, this.#frameSource)
+  }
+
+  /** How the terminal takes image frames: a readable path or inline PNG bytes. */
+  setFrameSource(source: FrameSource): void {
+    this.#frameSource = source
+  }
+
+  get frameSource(): FrameSource {
+    return this.#frameSource
   }
 
   /** A visual-tier raster, refused clearly when the provider has none. */
@@ -518,9 +529,9 @@ export class Hub {
    * the detail and metrics the last frame() established. Undefined when the
    * provider does not stream, so the pane can fall back to frame().
    */
-  async latestFrame(since: number): Promise<Frame | { same: true; generation: number } | undefined> {
+  async latestFrame(since: number): Promise<FramePoll | undefined> {
     if (!this.provider.latestFrame) return undefined
-    return await this.provider.latestFrame(since)
+    return await this.provider.latestFrame(since, this.#frameSource)
   }
 
   /** Leaving image mode restores the viewport the text and visual tiers assume. */

@@ -92,10 +92,11 @@ export type ActResult = {
   url?: string
 }
 
-export type Frame = {
-  /** Absolute path of a PNG the terminal reads itself. */
-  file: string
-  /** Increases with every capture; the same path may hold new bytes. */
+/** How the terminal takes a frame: a PNG path it reads, or inline PNG bytes. */
+export type FrameSource = 'file' | 'png'
+
+type FrameMetrics = {
+  /** Increases with every capture; the same file may hold new bytes. */
   generation: number
   columns: number
   rows: number
@@ -106,6 +107,20 @@ export type Frame = {
   pixelWidth: number
   pixelHeight: number
 }
+
+export type Frame = FrameMetrics &
+  (
+    | {
+        kind: 'file'
+        /** Absolute path of a PNG the terminal reads itself. */
+        file: string
+      }
+    | {
+        kind: 'png'
+        /** The whole PNG, base64, for terminals that take inline bytes. */
+        data: string
+      }
+  )
 
 /** A streamed frame, or the newest generation when the pane is already current. */
 export type FramePoll = Frame | { same: true; generation: number; streaming?: boolean }
@@ -145,10 +160,10 @@ export type Provider = {
   act(action: Action, context: ActContext): Promise<ActResult>
   screenshot?(cols: number, rows: number): Promise<{ pngBase64: string; cols: number; rows: number }>
   raster?(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
-  /** A real-pixel PNG on disk, for terminals that can draw a file source. */
-  frame?(cols: number, rows: number, detail?: number): Promise<Frame>
+  /** A real-pixel PNG, as a file or inline bytes for the terminal's image tier. */
+  frame?(cols: number, rows: number, detail?: number, source?: FrameSource): Promise<Frame>
   /** The newest streamed frame, when the provider pushes frames. */
-  latestFrame?(since: number): Promise<FramePoll>
+  latestFrame?(since: number, source?: FrameSource): Promise<FramePoll>
   /** Leave image mode: restore the viewport the other tiers expect. */
   stopFrame?(): Promise<void>
   /** Describe a viewport point and any enclosing link, before clicking it. */

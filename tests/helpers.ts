@@ -43,6 +43,10 @@ export type Bottom = {
   frameFailures: number
   /** Directory of GET /frame?since polls to fail with a 500. */
   framePollFailures: number
+  /** Decoded bytes of an inline PNG frame; set above 2 MiB to exercise the cap. */
+  pngBytes: number
+  /** Per-detail decoded size, to prove the pane lowers detail before giving up. */
+  pngBytesAtDetail?: (detail: number) => number
   /** Bump the streamed generation, as a screencast frame would. */
   pushFrame: () => number
   /** Whether GET /frame?since reports a working stream. */
@@ -89,12 +93,16 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     framePollFailures: number
     streaming: boolean
     document: string
+    pngBytes: number
+    pngBytesAtDetail: ((detail: number) => number) | undefined
   } = {
     failHealth: false,
     frameFailures: 0,
     framePollFailures: 0,
     streaming: true,
     document: '<title>Reader fixture</title><h1>Reader fixture</h1><p>hello</p>',
+    pngBytes: 1024,
+    pngBytesAtDetail: undefined,
   }
   mock.store(on)
   mock.env(on, options.env ?? {})
@@ -102,6 +110,23 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
   // real bridge shares it: a newer number means a newer picture.
   let frameGeneration = 0
   let frameBox = { columns: 20, rows: 5 }
+  let frameSource: 'file' | 'png' = 'file'
+  let frameDetail = 2
+  const inlinePng = (bytes: number): string => {
+    // A PNG signature with a minimal IHDR (the engine validates both), then
+    // padding so the decoded size is at least `bytes`.
+    const header = [
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // signature
+      0, 0, 0, 13, // IHDR length
+      0x49, 0x48, 0x44, 0x52, // "IHDR"
+      0, 0, 0, 1, 0, 0, 0, 1, // width 1, height 1
+      8, 6, 0, 0, 0, // bit depth, color type, deflate, filter, interlace
+      0, 0, 0, 0, // CRC (not checked by the source validator)
+    ]
+    const total = Math.max(header.length, bytes)
+    const data = String.fromCharCode(...header) + '\0'.repeat(total - header.length)
+    return btoa(data)
+  }
   const states = new Map<string, { value: unknown; version: number }>()
 
   const value = <T,>(v: T) => ({ value: v }) as never
@@ -187,52 +212,61 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
           text: JSON.stringify({ same: true, generation: frameGeneration, streaming: bottomRef.streaming }),
         })
       }
-      return value({
-        status: 200,
-        ok: true,
-        headers: {},
-        text: JSON.stringify({
-          file: '/tmp/transom-test-live.png',
-          generation: frameGeneration,
-          columns: frameBox.columns,
-          rows: frameBox.rows,
-          pageWidth: frameBox.columns * 8,
-          pageHeight: frameBox.rows * 16,
-          pixelWidth: frameBox.columns * 8,
-          pixelHeight: frameBox.rows * 16,
-          same: false,
-        }),
-      })
+      const common = {
+        generation: frameGeneration,
+        columns: frameBox.columns,
+        rows: frameBox.rows,
+        pageWidth: frameBox.columns * 8,
+        pageHeight: frameBox.rows * 16,
+        pixelWidth: frameBox.columns * 8,
+        pixelHeight: frameBox.rows * 16,
+        same: false,
+      }
+      const live =
+        frameSource === 'png'
+          ? {
+              kind: 'png',
+              data: inlinePng(bottomRef.pngBytesAtDetail?.(frameDetail) ?? bottomRef.pngBytes),
+              ...common,
+            }
+          : { kind: 'file', file: '/tmp/transom-test-live.png', ...common }
+      return value({ status: 200, ok: true, headers: {}, text: JSON.stringify(live) })
     }
     if (path === '/frame' && bottomRef.frameFailures > 0) {
       bottomRef.frameFailures -= 1
       return value({ status: 500, ok: false, headers: {}, text: JSON.stringify({ ok: false, error: 'capture timed out' }) })
     }
     if (path === '/frame') {
-      // The render uses a file source, which the kit cannot create. The path
-      // does not need to exist for the tree assertion; see the pane test.
+      // The render uses a file or inline png source; the kit draws neither, so
+      // the tree assertion only inspects the source shape.
       const columns = Math.max(20, Math.min(Number(body.cols) || 20, 200))
       const rows = Math.max(5, Math.min(Number(body.rows) || 5, 120))
       const detail = Math.max(1, Math.min(Math.round(Number(body.detail) || 2), 3))
+      const source = body.source === 'png' ? 'png' : 'file'
+      frameSource = source
+      frameDetail = detail
       frameBodies.push({ ...body, detail })
       frameBox = { columns, rows }
       frameGeneration += 1
-      return value({
-        status: 200,
-        ok: true,
-        headers: {},
-        text: JSON.stringify({
-          file: '/tmp/transom-test-frame.png',
-          generation: frameGeneration,
-          columns,
-          rows,
-          detail,
-          pageWidth: columns * 8,
-          pageHeight: rows * 16,
-          pixelWidth: columns * 8 * detail,
-          pixelHeight: rows * 16 * detail,
-        }),
-      })
+      const common = {
+        generation: frameGeneration,
+        columns,
+        rows,
+        detail,
+        pageWidth: columns * 8,
+        pageHeight: rows * 16,
+        pixelWidth: columns * 8 * detail,
+        pixelHeight: rows * 16 * detail,
+      }
+      const frame =
+        source === 'png'
+          ? {
+              kind: 'png',
+              data: inlinePng(bottomRef.pngBytesAtDetail?.(detail) ?? bottomRef.pngBytes),
+              ...common,
+            }
+          : { kind: 'file', file: '/tmp/transom-test-frame.png', ...common }
+      return value({ status: 200, ok: true, headers: {}, text: JSON.stringify(frame) })
     }
     if (path === '/hit') {
       const x = Math.max(0, Math.round(Number(body.x) || 0))
@@ -379,6 +413,18 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     },
     set streaming(next: boolean) {
       bottomRef.streaming = next
+    },
+    get pngBytes() {
+      return bottomRef.pngBytes
+    },
+    set pngBytes(next: number) {
+      bottomRef.pngBytes = next
+    },
+    get pngBytesAtDetail() {
+      return bottomRef.pngBytesAtDetail
+    },
+    set pngBytesAtDetail(next: ((detail: number) => number) | undefined) {
+      bottomRef.pngBytesAtDetail = next
     },
     get document() {
       return bottomRef.document

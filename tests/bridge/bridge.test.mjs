@@ -322,6 +322,7 @@ test('frame writes a real PNG file and prunes old generations', async () => {
   await json('/navigate', { url: demo.url })
   const first = await json('/frame', { cols: 40, rows: 12 })
   assert.equal(first.status, 200)
+  assert.equal(first.body.kind, 'file', 'the default source is a file')
   assert.deepEqual(
     { columns: first.body.columns, rows: first.body.rows, pageWidth: first.body.pageWidth, pageHeight: first.body.pageHeight },
     { columns: 40, rows: 12, pageWidth: 1100, pageHeight: 660 },
@@ -371,6 +372,61 @@ test('frame captures at the requested detail and reports the real pixel size', a
   const many = await json('/frame', { cols: 20, rows: 5, detail: 9 })
   assert.ok(many.body.pixelWidth > many.body.pageWidth)
   assert.ok(many.body.pixelHeight > many.body.pageHeight)
+})
+
+test('png frames return inline bytes, write no file and stream as png', async () => {
+  await json('/navigate', { url: demo.url })
+  // A file frame first, so the test knows the frame directory and can watch it.
+  const still = await json('/frame', { cols: 40, rows: 12, detail: 1 })
+  assert.equal(still.body.kind, 'file')
+  const dir = dirname(still.body.file)
+  const stillsBefore = readdirSync(dir).filter(name => /^f\d+\.png$/.test(name)).length
+
+  const png = await json('/frame', { cols: 40, rows: 12, detail: 1, source: 'png' })
+  assert.equal(png.status, 200)
+  assert.equal(png.body.kind, 'png')
+  assert.equal(png.body.file, undefined, 'no file path in a png frame')
+  const bytes = Buffer.from(png.body.data, 'base64')
+  assert.deepEqual([...bytes.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'PNG signature')
+  assert.equal(bytes.subarray(12, 16).toString('ascii'), 'IHDR', 'IHDR is readable')
+  assert.equal(bytes.readUInt32BE(16), png.body.pixelWidth, 'IHDR width matches the report')
+  assert.equal(bytes.readUInt32BE(20), png.body.pixelHeight, 'IHDR height matches the report')
+  const stillsAfter = readdirSync(dir).filter(name => /^f\d+\.png$/.test(name)).length
+  assert.equal(stillsAfter, stillsBefore, 'png mode writes no still file')
+
+  // The screencast remembers the source: newer frames come back inline, and
+  // nothing is overwritten on disk for them either.
+  let latest = png.body.generation
+  let streamed
+  let deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    const answer = await json(`/frame?since=${latest}&source=png`)
+    assert.equal(answer.status, 200)
+    if (answer.body.same === false) {
+      streamed = answer.body
+      break
+    }
+    await json('/act', { action: { kind: 'scroll', dx: 0, dy: 1 } })
+    await sleep(200)
+  }
+  assert.ok(streamed, 'a newer streamed png arrived')
+  assert.ok(streamed.generation > latest, 'the streamed generation is newer')
+  assert.equal(streamed.kind, 'png')
+  assert.equal(streamed.file, undefined)
+  const live = Buffer.from(streamed.data, 'base64')
+  assert.deepEqual([...live.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
+  assert.equal(live.readUInt32BE(16), streamed.pixelWidth)
+  assert.equal(live.readUInt32BE(20), streamed.pixelHeight)
+  const stillNames = readdirSync(dir).filter(name => /^f\d+\.png$/.test(name))
+  assert.ok(stillNames.length <= 10, 'stills stay pruned')
+
+  // File mode is unchanged after a png session.
+  const fileAgain = await json('/frame', { cols: 40, rows: 12, detail: 1 })
+  assert.equal(fileAgain.body.kind, 'file')
+  assert.equal(existsSync(fileAgain.body.file), true)
+  assert.deepEqual([...readFileSync(fileAgain.body.file).subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
+
+  await json('/frame/stop', {})
 })
 
 test('frame reduces detail before width when the capture is capped', async () => {
