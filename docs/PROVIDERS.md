@@ -1,10 +1,8 @@
 # Provider author guide
 
-v0.1 ships a single `browser` provider, but the contract is written for many. Adding a provider means four things: implement the contract, declare capabilities, declare permission metadata, and wire it into the hub.
+The adapter contract is `engine/provider.ts`. The hub depends only on it, never on an adapter: a provider registry in `hooks/main.tsx` maps an id to a factory, and `Hub` is constructed with `{ providerFactory }`. Adding a provider means implementing the contract, declaring capabilities and permission metadata, and registering the factory.
 
 ## 1. Contract
-
-`providers/browser/contract.ts` is the reference implementation.
 
 ```ts
 type Provider = {
@@ -13,20 +11,27 @@ type Provider = {
     label: string
     capabilities: {
       pointer: boolean; keys: boolean; scroll: boolean; images: boolean;
-      text: boolean; minCols: number; minRows: number
+      text: boolean; navigation: boolean; minCols: number; minRows: number
     }
     allowSchemes: string[]
     defaultWidth: number
   }
-  start(): Promise<void>
+  readonly supervisor?: { onFatal(fn): void; onIdle(fn): void }
+  start(options?: { attachPort?: number }): Promise<void>
   stop(): Promise<void>
   health(): Promise<{ ok: boolean; url?: string; title?: string; error?: string | null }>
   snapshot(request: { scope: 'viewport' | 'document'; maxChars: number; cols: number; rows: number }): Promise<Snapshot>
   act(action: Action, context: { actor: 'person' | 'model' }): Promise<ActResult>
-  screenshot?(cols: number, rows: number): Promise<{ pngBase64: string }>
+  screenshot?(cols: number, rows: number): Promise<{ pngBase64: string; cols: number; rows: number }>
   raster?(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
+  frame?(cols: number, rows: number, detail?: number): Promise<Frame>
+  latestFrame?(since: number): Promise<FramePoll>
+  stopFrame?(): Promise<void>
+  hitAt?(x: number, y: number): Promise<Hit>
 }
 ```
+
+`supervisor` is only for providers that own a child process. `screenshot`, `raster`, `frame`, `latestFrame`, `stopFrame` and `hitAt` are optional and the hub/pane guard each of them.
 
 ### Snapshot
 
@@ -37,6 +42,7 @@ type SnapshotNode = {
   name: string         // whitespace-collapsed and truncated
   depth: number
   value?: string       // passwords masked
+  href?: string
   interactive?: boolean
   submits?: boolean
   state?: { disabled?; checked?; expanded?; selected?; focused? }
@@ -46,40 +52,42 @@ type SnapshotNode = {
 
 Hard requirements:
 
-1. **A ref must derive from the application's own object identity**, never a coordinate or an array index. The browser provider uses `WeakMap<Element, string>`; other providers should use a stable id from their protocol.
+1. **A ref must derive from the application's own object identity**, never a coordinate or an array index. The browser provider uses `WeakMap<Element, string>`; the reader hashes the document and appends the node ordinal.
 2. **An invalid ref must be reported explicitly** (`ActResult.stale = true`) so the pane can retake a snapshot. Never silently act on a different element.
 3. **Snapshots contain the visible region by default** and support a full-page request through `scope: 'document'`. Both obey `maxChars`.
 4. **Never put credentials in values.** Password and token fields get a placeholder.
 
 ### Actions
 
-The action set: `click` / `fill` / `select` / `focus` / `hover` / `press` / `scroll` / `navigate` / `back` / `forward` / `reload`. When capabilities are missing:
+The full action set: `click` / `check` / `uncheck` / `clickAt` / `fill` / `select` / `focus` / `hover` / `press` / `scroll` / `wait` / `navigate` / `back` / `forward` / `reload`.
 
-- No pointer: hide pane row clicks, keep action tools.
-- No keyboard: do not render the keyboard strip.
-- Declare the supported subset in `capabilities`; `hub/negotiate.ts` handles degradation.
+The hub checks `capabilities` before it prompts or executes and fails closed with `the <label> provider does not support <kind> (no <capability>)`:
 
-`ActResult` must carry `message`. On success where the application may have changed, set `changed: true` so the hub refreshes.
+- `pointer` gates `click`, `check`, `uncheck`, `clickAt`, `hover`, `fill`, `select`, `focus`.
+- `keys` gates `press`.
+- `scroll` gates `scroll`.
+- `navigation` gates `navigate`, `back`, `forward`, `reload`.
 
-## 2. Transport
+Declare only what the adapter really implements. An action outside the set (for example `fill` on a text-only provider) reaches `act()` and should return a clear unsupported message. `wait` has no capability bit and is likewise the adapter's business.
 
-The browser provider's pattern is recommended:
+`ActResult` must carry `message`. On success where the application may have changed, set `changed: true` so the hub refreshes. `navigate`, `back` and `forward` should set `url` to where they landed.
 
-- One supervised local child process (`engine/supervisor.ts`) whose first stdout line is `{"ready":true,"port":N}`.
-- Loopback HTTP with a random bearer token.
-- At least `/health`, `/snapshot`, `/act`, `/stop`.
+## 2. Two reference adapters
 
-Do not assume Node, DOM or a PTY inside the plugin module. `spawn` stdin is one-shot and there is no PTY; interactive programs must expose their own protocol.
+- `providers/browser/client.ts` is the full-featured adapter: a supervised local child process (`engine/supervisor.ts`), loopback HTTP with a random bearer token, and `/health`, `/snapshot`, `/act`, `/shot`, `/raster`, `/frame`, `/frame/stop` and `/hit`.
+- `providers/reader/client.ts` is the minimal read-only adapter: it fetches over `ops.fetch`, parses with `providers/reader/parse.ts`, and implements only `navigate` / `back` / `forward` / `reload` on top of a per-URL cache. It declares `text: true`, `navigation: true`, everything else false, with `allowSchemes: ['http:', 'https:']`. Use it as the copyable skeleton for a browser-free provider.
 
-## 3. Permissions
+Do not assume Node, DOM or a PTY inside the plugin module. `spawn` stdin is one-shot and there is no PTY; interactive programs must expose their own protocol. Use `ops.fetch` and `ops.after` instead; both are provider-safe.
 
-Extend `classify()` in `hub/permissions.ts` with the action level (read / write / submit), and `decide()` with scheme and target allowlists. Unknown schemes are denied; writes are confirmed by default.
+## 3. Permissions and schemes
+
+`hub/permissions.ts` holds `classify()` (read / write / navigate), `decide()` (scheme and host allowlists) and the confirmation flow. Every action funnels through the same queue, whether a person or the model sent it. Declare `allowSchemes`; the hub refuses a `navigate` whose scheme is absent. Unknown schemes are denied, and writes are confirmed by default.
 
 ## 4. Rendering
 
-For the text tier, returning `SnapshotNode[]` is enough: `projectRows` in `hooks/main.tsx` turns it into buttons and text. The visual tier is optional: implement `raster()` returning base64 of `columns * rows` u32 triplets `[codePoint, foreground, background]`.
+For the text tier, returning `SnapshotNode[]` is enough: `projectRows` in `hooks/main.tsx` turns it into buttons, inputs and text. Without `pointer`, interactive rows render as plain text. The visual tier is optional: implement `raster()` returning base64 of `columns * rows` u32 triplets `[codePoint, foreground, background]`. `frame()` and `latestFrame()` are the image tier.
 
-## 4.1 Tool result shape (measured)
+## 5. Tool result shape (measured)
 
 For a tool registered with `$.tool.register` and no output schema, `result` in the `tool.call` answer must be a **plain string**:
 
@@ -91,17 +99,19 @@ Returning MCP-style `{ content: [{ type: 'text', ... }] }` is rejected by 2.1.31
 `does not match its output shape: invalid_union … expected string, received object`.
 Serialize structured data into text (or declare an output schema if the build supports it).
 
-## 5. Testing
+## 6. Testing
 
 1. Pure logic tests go in `tests/*.test.ts` (`claude plugin test .`).
 2. Child-protocol tests use `node:test`, modelled on `tests/bridge/bridge.test.mjs`.
-3. Cover at least: snapshot structure, click/fill, stale refs, scheme refusal, process stop.
-4. Add a fake endpoint to `tests/helpers.ts` so plugin tests never depend on a real process.
+3. Cover at least: snapshot structure, an action, stale refs, scheme refusal, process stop.
+4. Never depend on a real process in plugin tests. `tests/helpers.ts` fakes the bridge and non-bridge fetches; `tests/reader.test.ts` uses a fake `ops.fetch`.
 
-## 6. Integration order
+## 7. Integration order
 
-1. `providers/<name>/contract.ts` — capabilities and metadata
-2. `providers/<name>/client.ts` — the Provider implementation
-3. Instantiate it in `hub/hub.ts` (v0.1 has only the browser, constructed directly)
-4. Add commands and a tool namespace in `hooks/main.tsx`
+1. `engine/provider.ts` — the shared contract (only if a new capability is genuinely needed)
+2. `providers/<name>/client.ts` — the Provider implementation and its metadata
+3. `hooks/main.tsx` — add the id to `providerFactory`
+4. A command (or tool) that calls `hub.useProvider(id)`; `open()` always selects `browser`, `/transom reader` selects `reader`
 5. If it introduces persistent state, extend `PluginState` in `types/index.d.ts`
+
+The hub's constructor takes `{ providerFactory(id): Provider }`; `useProvider(id)` stops the previous provider when it owns a process and clears snapshots. Audit rows use `meta.id`.

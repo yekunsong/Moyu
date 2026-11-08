@@ -900,3 +900,53 @@ test('the warning allow host button adds a session grant', async ($, on) => {
   expect(bottom.page.url).toBe('https://scripted.test/other')
   await ui.unmount()
 })
+
+test('the reader provider draws text and hides pointer, keys, hq and visual', async ($, on) => {
+  const bottom = installBottom(on)
+  bottom.document = '<title>Read me</title><h1>Reading</h1><p>Hello paragraph</p><a href="https://reader.test/next">Next page</a>'
+  load(on)
+  await start($)
+  const opened = await command($, 'reader https://reader.test/page')
+  expect(opened.text ?? '').toContain('text only')
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  expect(await ui.find({ type: 'Text', text: /Hello paragraph/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Next page/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'hq' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'visual' })).toBeUndefined()
+  // Navigation is supported (navigate/back); pointer, keys and scrolling are not.
+  expect(await ui.find({ type: 'Button', key: 'back' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'up' })).toBeUndefined()
+  expect(await ui.find({ type: 'Client', key: 'keys' })).toBeUndefined()
+  // A text-only provider makes link rows plain text, not buttons.
+  expect(await ui.find({ type: 'Text', text: /Next page →/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the reader refuses an unsupported action with a message', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await command($, 'reader https://reader.test/page')
+  const acted = await tool($, 'browser_act', { kind: 'press', key: 'Enter' })
+  expect(acted.text ?? '').toContain('does not support press')
+  // The reader was never spoken to over the bridge.
+  expect(bottom.page.actCalls.length).toBe(0)
+})
+
+test('the reader command validates its URL', async ($, on) => {
+  installBottom(on)
+  load(on)
+  await start($)
+  const bad = await command($, 'reader file:///c:/x.html')
+  expect(bad.text ?? '').toContain('http and https only')
+  const notUrl = await command($, 'reader nope')
+  expect(notUrl.text ?? '').toContain('not a URL')
+})

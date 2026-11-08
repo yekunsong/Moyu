@@ -4,7 +4,9 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { Ops } from '../engine/ops'
 import { EMPTY_VIEW, Hub, hostOfUrl, normaliseKey, type ViewModel, type ViewRow } from '../hub/hub'
 import { detectImageTier, negotiate, type ImageTier } from '../hub/negotiate'
-import type { Frame } from '../providers/browser/contract'
+import type { Frame, Provider } from '../engine/provider'
+import { BrowserProvider } from '../providers/browser/client'
+import { ReaderProvider } from '../providers/reader/client'
 import { glyphFor, pressRow } from '../providers/browser/rows'
 import { registerToolSpecs, registerTools } from './tools'
 
@@ -130,9 +132,13 @@ function statusLine(model: ViewModel, shown: number, width: number): string {
   return clip(`${model.mode} · ${shown}/${model.rows.length} shown · ${model.audit[0] ?? 'no actions yet'}`, width)
 }
 
+function providerFactory(ops: Ops): (id: string) => Provider {
+  return id => (id === 'reader' ? new ReaderProvider(ops) : new BrowserProvider(ops))
+}
+
 function ensureHub(ops: Ops, options: Record<string, unknown>, refresh: () => void): Hub {
   if (!hub) {
-    hub = new Hub(ops, options)
+    hub = new Hub(ops, options, { providerFactory: providerFactory(ops) })
     hub.onRefresh(refresh)
   }
   return hub
@@ -178,15 +184,15 @@ export const register: Register = (on, options) => {
     }
     stopFrames()
     lastFrame = { file: '', generation: 0, columns: 0, rows: 0, pageWidth: 0, pageHeight: 0, url: '' }
-    void hub!.provider.start().catch(error => {
-      ops.log(`bridge start: ${String((error as Error).message ?? error)}`)
+    void hub!.start().catch(error => {
+      ops.log(`provider start: ${String((error as Error).message ?? error)}`)
     })
     await registerToolSpecs($)
     await $.command.register({
       name: 'transom',
       description:
-        'Transom pane: open a URL, run the demo, attach to Chrome, allow or deny a host for the session, inspect the audit, switch to hq, close',
-      argumentHint: 'open <url> | demo | attach <port> | allow <host> | deny <host> | audit | hq | close',
+        'Transom pane: open a URL, read one as text without a browser, run the demo, attach to Chrome, allow or deny a host for the session, inspect the audit, switch to hq, close',
+      argumentHint: 'open <url> | reader <url> | demo | attach <port> | allow <host> | deny <host> | audit | hq | close',
     })
     await update($, view, () => EMPTY_VIEW)
     lastShot = { key: '', cells: '', columns: 0, rows: 0, url: '' }
@@ -291,6 +297,23 @@ export const register: Register = (on, options) => {
       }
     }
 
+    if (verb === 'reader') {
+      if (!target) return { text: 'usage: /transom reader <http(s) url>' }
+      let protocol: string
+      try {
+        protocol = new URL(target).protocol
+      } catch {
+        return { text: `not a URL: ${target}` }
+      }
+      if (protocol !== 'http:' && protocol !== 'https:') return { text: `reader accepts http and https only (got ${protocol})` }
+      // Switching providers ends a browser image mode that the reader cannot
+      // continue; stop its clock and restore the owned page before the switch.
+      stopFrames()
+      await showPane(ops)
+      const opened = await transom.reader(target)
+      return { text: opened.ok ? `reading ${transom.view.url} (text only, no browser)` : opened.message }
+    }
+
     if (verb === 'open' && target) {
       await showPane(ops)
       const opened = await transom.open(target, transom.provider.meta.defaultWidth)
@@ -309,7 +332,7 @@ export const register: Register = (on, options) => {
       return { text: opened.ok ? `opened ${transom.view.url}` : opened.message }
     }
 
-    return { text: 'usage: /transom open <url> | demo | attach <port> | allow <host> | deny <host> | audit | hq | close' }
+    return { text: 'usage: /transom open <url> | reader <url> | demo | attach <port> | allow <host> | deny <host> | audit | hq | close' }
   })
 
   on('ui.message', { requestId: PANE }, async ($, e) => {
@@ -418,21 +441,31 @@ export const register: Register = (on, options) => {
     // Page actions first, view actions after a dim rule: one row, no new verbs.
     const toolbar = (
       <Box flexDirection="row" gap={1}>
-        <Button key="back" plain onPress={() => void transom.act({ kind: 'back' }, 'person')}>
-          <Text dimColor>back</Text>
-        </Button>
-        <Button key="reload" plain onPress={() => void transom.act({ kind: 'reload' }, 'person')}>
-          <Text dimColor>reload</Text>
-        </Button>
-        <Button key="up" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: -4 }, 'person')}>
-          <Text dimColor>pgup</Text>
-        </Button>
-        <Button key="down" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: 4 }, 'person')}>
-          <Text dimColor>pgdn</Text>
-        </Button>
-        <Button key="enter" plain onPress={() => void transom.act({ kind: 'press', key: 'Enter' }, 'person')}>
-          <Text dimColor>enter</Text>
-        </Button>
+        {degradation.navigation ? (
+          <>
+            <Button key="back" plain onPress={() => void transom.act({ kind: 'back' }, 'person')}>
+              <Text dimColor>back</Text>
+            </Button>
+            <Button key="reload" plain onPress={() => void transom.act({ kind: 'reload' }, 'person')}>
+              <Text dimColor>reload</Text>
+            </Button>
+          </>
+        ) : null}
+        {degradation.scroll ? (
+          <>
+            <Button key="up" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: -4 }, 'person')}>
+              <Text dimColor>pgup</Text>
+            </Button>
+            <Button key="down" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: 4 }, 'person')}>
+              <Text dimColor>pgdn</Text>
+            </Button>
+          </>
+        ) : null}
+        {degradation.keys ? (
+          <Button key="enter" plain onPress={() => void transom.act({ kind: 'press', key: 'Enter' }, 'person')}>
+            <Text dimColor>enter</Text>
+          </Button>
+        ) : null}
         <Text key="sep" dimColor>│</Text>
         <Button key="snap" plain onPress={() => void transom.refresh('viewport')}>
           <Text dimColor>refresh</Text>
@@ -440,10 +473,12 @@ export const register: Register = (on, options) => {
         <Button key="doc" plain onPress={() => void transom.refresh('document')}>
           <Text dimColor>whole page</Text>
         </Button>
-        <Button key="visual" plain onPress={() => showVisual($, ops, transom, width, rows, model.mode)}>
-          <Text dimColor>{model.mode === 'visual' ? 'text mode' : 'visual'}</Text>
-        </Button>
-        {imageTier.supported ? (
+        {degradation.images && transom.provider.raster ? (
+          <Button key="visual" plain onPress={() => showVisual($, ops, transom, width, rows, model.mode)}>
+            <Text dimColor>{model.mode === 'visual' ? 'text mode' : 'visual'}</Text>
+          </Button>
+        ) : null}
+        {degradation.images && imageTier.supported && transom.provider.frame ? (
           <Button key="hq" plain onPress={() => void toggleImage($, ops, transom, width, rows, model.mode)}>
             <Text dimColor>{model.mode === 'image' ? 'text mode' : 'hq'}</Text>
           </Button>
@@ -493,7 +528,7 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column" width="100%">
           {header}
           <Text dimColor>
-            {model.status === 'starting' ? 'starting the browser…' : 'No page yet. /transom demo starts a local fixture.'}
+            {model.status === 'starting' ? `starting the ${transom.provider.meta.label.toLowerCase()}…` : 'No page yet. /transom demo starts a local fixture.'}
           </Text>
           <Button key="demo" onPress={() => void runDemo(ops, transom)}>Open the demo app</Button>
           {recent.slice(0, 5).map((url, index) => (
@@ -504,7 +539,7 @@ export const register: Register = (on, options) => {
           {warning}
           {toolbar}
           <Text key="status" dimColor>{statusLine(model, 0, width)}</Text>
-          <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
+          {degradation.keys ? <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} /> : null}
         </Box>
       )
     }
@@ -519,7 +554,7 @@ export const register: Register = (on, options) => {
           {toolbar}
           <Raster key="shot" columns={rasterCols} rows={rasterRows} cells={shot.cells} />
           <Text key="status" dimColor>{statusLine(model, model.rows.length, width)}</Text>
-          <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
+          {degradation.keys ? <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} /> : null}
         </Box>
       )
     }
@@ -550,7 +585,7 @@ export const register: Register = (on, options) => {
           </Box>
           <Text dimColor>read-only · click the image to click the page · text mode to edit</Text>
           <Text key="status" dimColor>{statusLine(model, model.rows.length, width)}</Text>
-          <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
+          {degradation.keys ? <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} /> : null}
         </Box>
       )
     }
@@ -620,6 +655,15 @@ export const register: Register = (on, options) => {
               rowError(row),
             ]
           }
+          if (!degradation.pointer) {
+            return [
+              <Text key={row.ref} dimColor>
+                {indentFor(row)}{glyphFor(row)} {row.label}
+                {row.href ? ` → ${shortHref(row.href)}` : ''}
+              </Text>,
+              rowError(row),
+            ]
+          }
           return [
             <Button key={row.ref} plain onPress={() => void pressRow(ops, transom, row)}>
               <Text dimColor={row.flags?.includes('disabled')}>
@@ -632,13 +676,13 @@ export const register: Register = (on, options) => {
             rowError(row),
           ]
         })}
-        {model.rows.length > shown.length ? (
+        {degradation.scroll && model.rows.length > shown.length ? (
           <Button key="next" plain onPress={() => void transom.act({ kind: 'scroll', dx: 0, dy: room }, 'person')}>
             <Text dimColor>↓ next block ({model.rows.length - shown.length} more)</Text>
           </Button>
         ) : null}
         <Text key="status" dimColor>{statusLine(model, shown.length, width)}</Text>
-        <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
+        {degradation.keys ? <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} /> : null}
       </Box>
     )
   })
@@ -677,7 +721,7 @@ async function showVisual(
   const cols = Math.max(20, Math.min(width, 160))
   const height = Math.max(5, Math.min(rows - 9, 40))
   try {
-    const shot = await transom.provider.raster(cols, height)
+    const shot = await transom.raster(cols, height)
     lastShot = { key: String(Date.now()), ...shot, url: transom.view.url }
     await update($, view, model => ({ ...model, mode: 'visual' as const, last: `visual ${shot.columns}x${shot.rows}` }))
     void $.ui.invalidate('ui.render')
@@ -883,7 +927,7 @@ async function takeSharpStill($: EngineInterface, transom: Hub): Promise<void> {
 
 async function retry(ops: Ops, transom: Hub): Promise<void> {
   try {
-    await transom.provider.start()
+    await transom.start()
     await transom.refresh()
   } catch (error) {
     ops.toast(`retry: ${String((error as Error).message ?? error)}`)

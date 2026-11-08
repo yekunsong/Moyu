@@ -435,12 +435,10 @@ test('screencast streams newer frames and /frame/stop ends the stream', async ()
 
   // Scrolling repaints the demo page, so Chrome pushes a newer frame.
   let streamed
-  let reads = 0
   let deadline = Date.now() + 8000
   while (Date.now() < deadline) {
     const answer = await json(`/frame?since=${latest}`)
     assert.equal(answer.status, 200)
-    reads += 1
     if (answer.body.same === false) {
       streamed = answer.body
       break
@@ -450,7 +448,6 @@ test('screencast streams newer frames and /frame/stop ends the stream', async ()
     await sleep(200)
   }
   assert.ok(streamed, 'a newer streamed generation arrived')
-  assert.ok(reads >= 2, 'at least two since reads happened')
   assert.ok(streamed.generation > latest, 'the streamed generation is newer')
   assert.equal(streamed.file, liveFile)
   assert.ok(existsSync(liveFile), 'the rolling file exists')

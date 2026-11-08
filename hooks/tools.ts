@@ -1,6 +1,6 @@
 import type { EngineInterface, On } from 'claude-code'
 
-import type { Action } from '../providers/browser/contract'
+import type { Action } from '../engine/provider'
 import { normaliseKey, type Hub } from '../hub/hub'
 
 type ToolDeps = {
@@ -199,10 +199,11 @@ export function registerTools(on: On, deps: ToolDeps): void {
   on('tool.call', { tool: 'mcp__transom__browser_screenshot' }, async (_$, e) => {
     const input = e as unknown as { cols?: number; rows?: number }
     if (hub().view.status === 'closed') return fail('No page is open. Call browser_open first.')
+    if (!hub().provider.screenshot) return fail(`the ${hub().provider.meta.label} provider has no screenshots`)
     try {
-      const shot = await hub().provider.screenshot(input.cols ?? 110, input.rows ?? 34)
+      const shot = await hub().screenshot(input.cols ?? 110, input.rows ?? 34)
       const entry = await hub().audit.log({
-        actor: 'model', provider: 'browser', action: 'screenshot', url: hub().view.url,
+        actor: 'model', provider: hub().provider.meta.id, action: 'screenshot', url: hub().view.url,
         policy: 'read-only', ok: true, message: `${shot.cols}x${shot.rows}`,
       })
       return answer(`screenshot ${shot.cols}x${shot.rows} captured, audit ${entry.id} (image available in the pane)`)

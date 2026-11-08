@@ -1,5 +1,5 @@
 import type { Ops } from '../engine/ops'
-import type { Action } from '../providers/browser/contract'
+import type { Action } from '../engine/provider'
 
 export type AuditEntry = {
   id: string

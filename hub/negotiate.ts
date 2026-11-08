@@ -1,5 +1,5 @@
 import type { Ops } from '../engine/ops'
-import type { Capabilities } from '../providers/browser/contract'
+import type { Capabilities } from '../engine/provider'
 
 export type Degradation = {
   mode: 'full' | 'text' | 'summary'
@@ -7,6 +7,7 @@ export type Degradation = {
   keys: boolean
   scroll: boolean
   images: boolean
+  navigation: boolean
   reason?: string
 }
 
@@ -18,11 +19,12 @@ export function negotiate(caps: Capabilities, cols: number, rows: number, isTmux
       keys: false,
       scroll: false,
       images: false,
+      navigation: false,
       reason: `pane too small (${cols}x${rows}, needs ${caps.minCols}x${caps.minRows})`,
     }
   }
   const images = caps.images && !isTmux
-  return { mode: 'text', pointer: caps.pointer, keys: caps.keys, scroll: caps.scroll, images }
+  return { mode: 'text', pointer: caps.pointer, keys: caps.keys, scroll: caps.scroll, images, navigation: caps.navigation }
 }
 
 export function detectTmux(): boolean {

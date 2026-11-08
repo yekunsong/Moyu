@@ -2,8 +2,7 @@
 // confirmation, audit, execution, refresh. Serial by construction.
 import { ask, storeGet, storeSet } from '../engine/adapter'
 import type { Ops } from '../engine/ops'
-import type { Action, ActResult, Frame, Hit, Snapshot } from '../providers/browser/contract'
-import { BrowserProvider } from '../providers/browser/client'
+import type { Action, ActResult, Capabilities, Frame, Hit, Provider, Snapshot } from '../engine/provider'
 import { Audit } from './audit'
 import { classify as classificationOf, configOf, decide, describeAction, grantMatches, hostAllowed, newGrant, type Config, type SessionGrant } from './permissions'
 
@@ -53,13 +52,20 @@ export const EMPTY_VIEW: ViewModel = {
 
 const RECENT_KEY = 'recent.v1'
 
+export type HubOptions = {
+  /** Build a provider by registry id; the hub never imports an adapter. */
+  providerFactory: (id: string) => Provider
+}
+
 export class Hub {
-  readonly provider: BrowserProvider
   readonly audit: Audit
   readonly config: Config
   readonly grant: SessionGrant = newGrant()
   /** The debugging port while attached to a browser the person started. */
   attachPort?: number
+  readonly #factory: (id: string) => Provider
+  #provider: Provider
+  #started = false
   #queue: Promise<unknown> = Promise.resolve()
   #lastSnapshot: Snapshot | undefined
   #refresh: (() => void) | undefined
@@ -67,22 +73,67 @@ export class Hub {
   #cols = 110
   #rows = 34
 
-  constructor(private readonly ops: Ops, options: Record<string, unknown>) {
-    this.provider = new BrowserProvider(ops)
+  constructor(private readonly ops: Ops, options: Record<string, unknown>, deps: HubOptions) {
+    this.#factory = deps.providerFactory
+    this.#provider = this.#factory('browser')
     this.audit = new Audit(ops)
     this.config = configOf(options)
-    this.provider.supervisor.onFatal(reason => {
+    this.#watch(this.#provider)
+  }
+
+  get provider(): Provider {
+    return this.#provider
+  }
+
+  /** Attach lifecycle listeners when the provider owns a supervised process. */
+  #watch(provider: Provider): void {
+    provider.supervisor?.onFatal(reason => {
       if (!reason) return
       this.#setView({ status: 'error', error: reason, rows: [], audit: this.audit.recent(6).map(shortAudit) })
     })
-    this.provider.supervisor.onIdle(() => {
+    provider.supervisor?.onIdle(() => {
       this.#setView({
         status: 'closed',
         error: undefined,
         rows: [],
-        last: 'browser stopped after 30 minutes idle',
+        last: `${provider.meta.label} stopped after 30 minutes idle`,
       })
     })
+  }
+
+  /**
+   * Switch adapters. A provider that owns a process is stopped first; all
+   * snapshots belong to the old provider and are dropped with it.
+   */
+  async useProvider(id: string): Promise<Provider> {
+    return await this.enqueue(() => this.#select(id))
+  }
+
+  async #select(id: string): Promise<Provider> {
+    if (this.#provider.meta.id === id) return this.#provider
+    await this.#stop()
+    this.#provider = this.#factory(id)
+    this.#watch(this.#provider)
+    this.#setView({ ...EMPTY_VIEW, last: `provider: ${this.#provider.meta.label}` })
+    return this.#provider
+  }
+
+  async start(): Promise<void> {
+    await this.provider.start()
+    this.#started = true
+  }
+
+  async #stop(): Promise<void> {
+    if (this.#started) {
+      try {
+        await this.provider.stop()
+      } catch {
+        /* the next provider still gets a clean start */
+      }
+    }
+    this.#started = false
+    this.#lastSnapshot = undefined
+    this.attachPort = undefined
   }
 
   get view(): ViewModel {
@@ -119,15 +170,27 @@ export class Hub {
     return next
   }
 
+  /** Open a URL in the browser provider, the default for URL commands. */
   async open(url: string, width: number, actor: 'person' | 'model' = 'person'): Promise<{ ok: boolean; message: string }> {
+    return await this.openWith('browser', url, actor)
+  }
+
+  /** Open a URL in the read-only provider, with no browser process. */
+  async reader(url: string, actor: 'person' | 'model' = 'person'): Promise<{ ok: boolean; message: string }> {
+    return await this.openWith('reader', url, actor)
+  }
+
+  async openWith(providerId: string, url: string, actor: 'person' | 'model' = 'person'): Promise<{ ok: boolean; message: string }> {
     return await this.enqueue(async () => {
-      const auditId = await this.audit.begin(actor, 'browser', `open ${clean(url)}`, 'open', url)
+      const auditId = await this.audit.begin(actor, providerId, `open ${clean(url)}`, 'open', url)
       const started = Date.now()
       this.#setView({ status: 'starting', error: undefined, url, title: '', rows: [], last: `opening ${url}` })
       try {
         const target = url
-        // Decide before starting Chrome: a denied host never launches a browser.
+        // Decide before switching providers: a denied host never stops the
+        // current provider, let alone launches a browser.
         if (target) {
+          assertHttpUrl(target)
           const decision = decide(this.config, { kind: 'navigate', url: target }, actor, this.grant)
           if (decision.effect === 'deny') throw new Error(decision.reason)
           if (decision.effect === 'confirm') {
@@ -140,7 +203,9 @@ export class Hub {
             else if (answer !== 'Allow') throw new Error('navigation denied by person')
           }
         }
-        await this.provider.start()
+        await this.#select(providerId)
+        if (target) this.#checkScheme(target)
+        await this.start()
         if (target) {
           const result = await this.provider.act({ kind: 'navigate', url: target }, { actor })
           if (!result.ok) throw new Error(result.message)
@@ -167,7 +232,8 @@ export class Hub {
     return await this.enqueue(async () => {
       const started = Date.now()
       // Drop any browser this hub owns before switching to the person's one.
-      await this.provider.stop()
+      await this.#select('browser')
+      await this.#stop()
       this.attachPort = port
       this.#setView({
         status: 'starting',
@@ -179,12 +245,13 @@ export class Hub {
       })
       try {
         await this.provider.start({ attachPort: port })
+        this.#started = true
         const snapshot = await this.refresh()
         if (!snapshot) throw new Error(this.#view.error ?? 'the attached browser did not answer')
         const message = `attached to ${snapshot.title || snapshot.url || `port ${port}`}`
         await this.audit.log({
           actor: 'person',
-          provider: 'browser',
+          provider: this.provider.meta.id,
           action: `attach ${port}`,
           url: snapshot.url,
           policy: 'person',
@@ -200,10 +267,11 @@ export class Hub {
         return { ok: true, message }
       } catch (error) {
         const message = String((error as Error).message ?? error)
-        if (this.provider.supervisor.phase !== 'ready') this.attachPort = undefined
+        const health = await this.provider.health().catch(() => ({ ok: false }))
+        if (!health.ok) this.attachPort = undefined
         await this.audit.log({
           actor: 'person',
-          provider: 'browser',
+          provider: this.provider.meta.id,
           action: `attach ${port}`,
           policy: 'person',
           ok: false,
@@ -218,8 +286,7 @@ export class Hub {
 
   async close(): Promise<void> {
     await this.enqueue(async () => {
-      await this.provider.stop()
-      this.attachPort = undefined
+      await this.#stop()
       this.#view = { ...EMPTY_VIEW }
       this.#refresh?.()
     })
@@ -229,6 +296,29 @@ export class Hub {
     // Decision, confirmation and execution are one critical section: a person's
     // click cannot land between a model's confirmation and its execution.
     return await this.enqueue(async () => {
+      // Fail closed before any permission prompt: an action the adapter cannot
+      // perform is refused with the capability that is missing.
+      const gap = capabilityGap(this.provider.meta.capabilities, action)
+      if (gap) {
+        const message = `the ${this.provider.meta.label} provider does not support ${action.kind} (no ${gap})`
+        const entry = await this.audit.log({
+          actor, provider: this.provider.meta.id, action: describeAction(action), url: this.#view.url,
+          policy: 'unsupported', ok: false, message,
+        })
+        return { result: { ok: false, message }, auditId: entry.id }
+      }
+      if (action.kind === 'navigate') {
+        try {
+          this.#checkScheme(action.url)
+        } catch (error) {
+          const message = String((error as Error).message ?? error)
+          const entry = await this.audit.log({
+            actor, provider: this.provider.meta.id, action: describeAction(action), url: this.#view.url,
+            policy: 'deny', ok: false, message,
+          })
+          return { result: { ok: false, message }, auditId: entry.id, denied: true }
+        }
+      }
       // Resolve a click's destination inside the queue, before the decision: a
       // model click or clickAt must not reach an off-list host unnoticed.
       let href: string | undefined
@@ -241,7 +331,7 @@ export class Hub {
       const decision = decide(this.config, action, actor, this.grant, href)
       if (decision.effect === 'deny') {
         const entry = await this.audit.log({
-          actor, provider: 'browser', action: describeAction(action), url: this.#view.url,
+          actor, provider: this.provider.meta.id, action: describeAction(action), url: this.#view.url,
           policy: 'deny', ok: false, message: decision.reason,
         })
         return { result: { ok: false, message: decision.reason }, auditId: entry.id, denied: true }
@@ -259,7 +349,7 @@ export class Hub {
         if (answer === 'Allow all this session') this.grant.auto = true
         else if (answer !== 'Allow') {
           const entry = await this.audit.log({
-            actor, provider: 'browser', action: describeAction(action), url: this.#view.url,
+            actor, provider: this.provider.meta.id, action: describeAction(action), url: this.#view.url,
             policy: 'confirm', ok: false, message: 'denied by person',
           })
           return { result: { ok: false, message: 'denied by person' }, auditId: entry.id, denied: true }
@@ -320,7 +410,7 @@ export class Hub {
     }
     const reason = denied ? 'is denied for this session' : 'is not on the allowed-hosts list'
     await this.audit.log({
-      actor, provider: 'browser', action: `escaped ${describeAction(action)}`,
+      actor, provider: this.provider.meta.id, action: `escaped ${describeAction(action)}`,
       url: this.#view.url, policy: 'deny', ok: false,
       message: `reached ${afterHost}, which ${reason}`,
     })
@@ -344,7 +434,7 @@ export class Hub {
     }
     await this.audit.log({
       actor: 'person',
-      provider: 'browser',
+      provider: this.provider.meta.id,
       action: `${allowed ? 'allow' : 'deny'} ${needle}`,
       url: this.#view.url,
       policy: 'person',
@@ -352,6 +442,18 @@ export class Hub {
       message: `session host ${allowed ? 'allowed' : 'denied'}`,
     })
     this.#setView({ warning: undefined, audit: this.audit.recent(6).map(shortAudit) })
+  }
+
+  /** Refuse a URL whose scheme the current provider does not declare. */
+  #checkScheme(url: string): void {
+    let protocol: string
+    try {
+      protocol = new URL(url).protocol
+    } catch {
+      throw new Error(`not a URL: ${url}`)
+    }
+    const allowed = this.provider.meta.allowSchemes
+    if (!allowed.includes(protocol)) throw new Error(`scheme ${protocol} is not allowed by the ${this.provider.meta.label} provider`)
   }
 
   /** Describe a viewport point; undefined when the provider cannot. */
@@ -367,7 +469,7 @@ export class Hub {
   }
 
   async refresh(scope: 'viewport' | 'document' = this.#view.scope): Promise<Snapshot | undefined> {
-    if (this.provider.supervisor.phase !== 'ready') return undefined
+    if (!this.#started) return undefined
     try {
       const snapshot = await this.provider.snapshot({
         scope,
@@ -395,7 +497,20 @@ export class Hub {
 
   /** Capture an HQ frame at the configured density; the pane maps clicks by CSS size. */
   async frame(cols: number, rows: number): Promise<Frame> {
-    return await this.provider.frame!(cols, rows, this.config.hqDetail)
+    if (!this.provider.frame) throw new Error(`the ${this.provider.meta.label} provider has no image capture`)
+    return await this.provider.frame(cols, rows, this.config.hqDetail)
+  }
+
+  /** A visual-tier raster, refused clearly when the provider has none. */
+  async raster(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }> {
+    if (!this.provider.raster) throw new Error(`the ${this.provider.meta.label} provider has no visual raster`)
+    return await this.provider.raster(cols, rows)
+  }
+
+  /** A PNG screenshot, refused clearly when the provider has none. */
+  async screenshot(cols: number, rows: number): Promise<{ pngBase64: string; cols: number; rows: number }> {
+    if (!this.provider.screenshot) throw new Error(`the ${this.provider.meta.label} provider has no screenshots`)
+    return await this.provider.screenshot(cols, rows)
   }
 
   /**
@@ -434,7 +549,7 @@ export class Hub {
       if (sinceLast) mode = 'full, no baseline'
     }
     const entry = await this.audit.log({
-      actor: 'model', provider: 'browser', action: `snapshot ${scope}`, url: snapshot?.url,
+      actor: 'model', provider: this.provider.meta.id, action: `snapshot ${scope}`, url: snapshot?.url,
       policy: 'read-only', ok: !!snapshot, durationMs: Date.now() - started,
       message: snapshot ? `${snapshot.nodes.length} nodes, ${mode}` : 'failed',
     })
@@ -447,7 +562,7 @@ export class Hub {
     const snapshot = this.#lastSnapshot ?? (await this.refresh('viewport'))
     if (!snapshot) {
       const failed = await this.audit.log({
-        actor: 'model', provider: 'browser', action: 'find', url: this.view.url,
+        actor: 'model', provider: this.provider.meta.id, action: 'find', url: this.view.url,
         policy: 'read-only', ok: false, durationMs: Date.now() - started, message: 'no snapshot',
       })
       return { text: `find failed: ${this.view.error ?? 'no snapshot'}`, auditId: failed.id }
@@ -462,7 +577,7 @@ export class Hub {
       if (matches.length > FIND_LIMIT) text += `\n… showing the first ${FIND_LIMIT} matches`
     }
     const entry = await this.audit.log({
-      actor: 'model', provider: 'browser', action: findLabel(query), url: snapshot.url,
+      actor: 'model', provider: this.provider.meta.id, action: findLabel(query), url: snapshot.url,
       policy: 'read-only', ok: true, durationMs: Date.now() - started,
       message: `${matches.length} of ${snapshot.nodes.length} nodes`,
     })
@@ -491,6 +606,18 @@ export class Hub {
 
 /** More headings than this are drawn as plain text, not section headers. */
 export const MAX_SECTIONS = 12
+
+/** The missing capability for an action, or undefined when it can run. */
+export function capabilityGap(caps: Capabilities, action: Action): keyof Capabilities | undefined {
+  const pointerKinds = new Set(['click', 'clickAt', 'check', 'uncheck', 'hover', 'fill', 'select', 'focus'])
+  if (pointerKinds.has(action.kind)) return caps.pointer ? undefined : 'pointer'
+  if (action.kind === 'press') return caps.keys ? undefined : 'keys'
+  if (action.kind === 'scroll') return caps.scroll ? undefined : 'scroll'
+  if (action.kind === 'navigate' || action.kind === 'back' || action.kind === 'forward' || action.kind === 'reload') {
+    return caps.navigation ? undefined : 'navigation'
+  }
+  return undefined
+}
 
 export function projectRows(snapshot: Snapshot, limit: number): ViewRow[] {
   const rows: ViewRow[] = []
@@ -703,6 +830,19 @@ function targetLabel(action: Action, snapshot: Snapshot | undefined, href?: stri
   const name = node?.name ? ` "${clean(node.name)}"` : ''
   const destination = dest ? ` -> ${clean(dest).slice(0, 120)}` : ''
   return `${name}${destination}`
+}
+
+/** Throw unless the URL parses and is http(s); used before a provider switch. */
+export function assertHttpUrl(url: string): void {
+  let protocol: string
+  try {
+    protocol = new URL(url).protocol
+  } catch {
+    throw new Error(`not a URL: ${url}`)
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    throw new Error(`scheme ${protocol} is not allowed`)
+  }
 }
 
 /** The hostname of a URL, lowercased, or undefined when it does not parse. */

@@ -68,13 +68,14 @@ Transom 把外部应用压成一对接口——`snapshot()` 读结构化状态�
 
 - **人和模型同一条通道。** 面板与 `mcp__transom__*` 工具进同一个串行动作队列；每条动作记录发起者、目标、策略、结果与耗时。
 - **结构化快照，不是截图。** 带稳定 ref 的对象图：role、无障碍名、值、状态、边界。ref 带文档代际，导航后不会悄悄重绑；失效返回 `stale`，不会误点。
-- **Provider 框架。** 能力协商、supervisor、白名单、渲染都在 hub；浏览器只是第一个适配器。
+- **由第二个适配器证明的 Provider 框架。** 能力协商、白名单、队列与审计都在 hub；浏览器只是一个适配器，只读的 `reader` 是另一个。hub 不导入任何 provider 代码，并拒绝 provider 能力缺少的动作。
 - **默认受权限约束。** 只允许 http(s)、主机白名单（localhost 恒允许）、模型写操作逐次确认（或 `once`/`auto`）、只接受精确的 Allow 标签、失败即拒绝。点击链接与 `clickAt` 会在点击前预检目标；页面脚本自行跳到白名单外主机时，会显示带 **back** 与 **allow host** 的 `escaped` 警告并入审计。
 - **全量审计。** 人与模型动作进同一环形缓冲并持久化到 `$.store`；填写内容脱敏。
 - **三档渲染。** 文本档（按钮、输入框、分区，任何终端）、彩色格档（半格块 Raster，24 位色）与 HQ 图像档（kitty、Ghostty、WezTerm 上的真实 PNG 画面）；窄面板降级为摘要行。
 - **行内编辑与结构。** 文本框和下拉框原地编辑；行按页面标题分区，带状态栏与分块翻页。
 - **崩溃隔离且可移植。** 受监督的本地 bridge 独占无头 Chromium；健康检查、退避重启、空闲自停、进程树清理、Linux/macOS 浏览器发现，测试已在 WSL 验证。
 - **接管模式。** `/transom attach <port>` 镜像你已运行的 Chrome（连同登录态），关闭时只断开、不退出浏览器。
+- **无浏览器阅读。** `/transom reader <url>` 用 `ops.fetch` 抓取页面，以文本显示标题、链接、段落与列表。它只支持文本，不执行 JavaScript、不保存 Cookie、无法登录；指针、键盘、滚动、图像与表单动作会带着缺失的能力被拒绝。
 - **模型端易用性。** 增量快照、`browser_find`、`browser_wait`，以及对话框自动处理（alert 接受；confirm/prompt 拒绝）。
 - **页面内容按不可信数据处理。** 快照带显式横幅；页面字符串在进对话框前剥掉控制字符；点击前做 `elementFromPoint` 命中测试，遮挡会报告 `covered`。
 
@@ -125,12 +126,15 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 |---|---|
 | `/transom` | 打开面板 |
 | `/transom open <url>` | 打开面板并导航（默认只允许 localhost/127.0.0.1 与配置的主机） |
+| `/transom reader <url>` | 在无浏览器、只读的 provider 中把页面读成文本（仅 http/https） |
 | `/transom demo` | 启动本地演示页（计数、表单、列表、canvas、shadow DOM、iframe、长滚动）并打开 |
 | `/transom attach <port>` | 连接已用 `--remote-debugging-port=<port>` 启动的 Chrome；`/transom close` 只断开，不关闭浏览器 |
 | `/transom allow <host\|url>` | 本次会话允许某主机（精确匹配或 `*.` 通配）；优先于配置白名单，并写入审计 |
 | `/transom deny <host\|url>` | 本次会话拒绝某主机；优先于配置白名单与会话允许，并写入审计 |
 | `/transom audit` | 最近 20 条审计 |
 | `/transom close` | 关闭面板并停止浏览器（attach 模式下仅断开连接） |
+
+reader 与浏览器共用同一套主机白名单、队列与审计，但从不启动 Chrome。它不执行 JavaScript、不继承登录态、不渲染图像；页面需要这些时请用 `/transom open`。
 
 会话授权以人的实时决定为准：`/transom allow` 与 `/transom deny` 接受主机名或完整 URL，仅在本次会话内生效，并以 `person allow <host>` / `person deny <host>` 写入审计。拒绝始终优先（包括 `localhost` 与会话允许）；再执行相反命令即可撤销先前的授权。
 

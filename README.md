@@ -68,13 +68,14 @@ Moving the window into the terminal is a side effect. The product is **structure
 
 - **One channel for people and models.** The pane and `mcp__transom__*` tools feed the same serial action queue; every action records actor, target, policy, result and duration.
 - **Structured snapshots, not screenshots.** A stable-ref object graph with roles, accessible names, values, state and bounds. Refs carry a document generation, so navigation cannot silently rebind them; stale refs return `stale` instead of clicking the wrong thing.
-- **Provider framework.** Capability negotiation, supervisor, allowlists and rendering live in the hub; the browser is the first adapter, not the only possible one.
+- **Provider framework, proven by a second adapter.** Capability negotiation, allowlists, the queue and auditing live in the hub; the browser is one adapter and the read-only `reader` is another. The hub imports no provider code and refuses actions a provider's capabilities lack.
 - **Permissioned by default.** http(s)-only navigation, host allowlist (`localhost` always), model writes confirmed per action (or `once`/`auto`), exact-label approval, fail-closed confirmations. A link click or `clickAt` preflights its destination before the click, and a page-script navigation to an unlisted host raises an audited `escaped` warning with **back** and **allow host**.
 - **Audited.** Human and model actions land in the same ring buffer and in `$.store`; fill text is redacted.
 - **Three rendering tiers.** Text (buttons, inputs and sections, any terminal), colored cells (half-block Raster, 24-bit color) and HQ images (real PNG frames on kitty, Ghostty, WezTerm). Degrades to a summary line in narrow panes.
 - **Inline editing and structure.** Text fields and selects edit in place; rows group under page headings with a status bar and block navigation.
 - **Crash-isolated and portable.** A supervised local bridge owns headless Chromium; health checks, backoff restarts, idle shutdown, process-tree cleanup, Linux/macOS discovery and WSL-verified tests.
 - **Attach mode.** `/transom attach <port>` mirrors a Chrome you already run, with its logins, and detaches without closing it.
+- **Browser-free reading.** `/transom reader <url>` fetches a page over `ops.fetch` and shows headings, links, paragraphs and lists as text. It is text-only, runs no JavaScript, keeps no cookies and cannot log in; pointer, keys, scroll, image and field actions are refused with the missing capability.
 - **Model ergonomics.** Delta snapshots, `browser_find`, `browser_wait`, and automatic dialog handling (alerts accepted; confirms/prompts dismissed).
 - **Untrusted page content is treated as data.** Snapshots start with an explicit banner; page strings are control-character-stripped before dialogs; clicks hit-test `elementFromPoint` and report covered targets.
 
@@ -125,12 +126,15 @@ The model's write is confirmed before it runs. `/transom audit` shows both actio
 |---|---|
 | `/transom` | Open the pane |
 | `/transom open <url>` | Open the pane and navigate (localhost/127.0.0.1 and configured hosts by default) |
+| `/transom reader <url>` | Read a page as text in the browser-free, read-only provider (http/https only) |
 | `/transom demo` | Start the local fixture (counter, form, list, canvas, shadow DOM, iframe, long scroller) and open it |
 | `/transom attach <port>` | Attach to a Chrome already running with `--remote-debugging-port=<port>`; `/transom close` detaches without closing it |
 | `/transom allow <host\|url>` | Allow a host for this session (exact or `*.` wildcard); outranks the configured allowlist and is audited |
 | `/transom deny <host\|url>` | Deny a host for this session; wins over both the allowlist and a session allow, and is audited |
 | `/transom audit` | Show the last 20 audit entries |
 | `/transom close` | Close the pane and stop the browser (in attach mode: detach only) |
+
+The reader uses the same host allowlist, queue and audit as the browser, but never starts Chrome. It does not execute JavaScript, follow logins or render images; use `/transom open` when a page needs them.
 
 Session grants are the person's live word: `/transom allow` and `/transom deny` accept a hostname or a full URL, apply for the rest of the session only, and are recorded in the audit as `person allow <host>` / `person deny <host>`. A deny always wins, including over `localhost` and over a session allow; run the opposite command to reverse an earlier grant.
 

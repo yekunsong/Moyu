@@ -22,6 +22,7 @@ const CAPS: Capabilities = {
   scroll: true,
   images: true,
   text: true,
+  navigation: true,
   minCols: 48,
   minRows: 10,
 }

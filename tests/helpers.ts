@@ -47,6 +47,8 @@ export type Bottom = {
   pushFrame: () => number
   /** Whether GET /frame?since reports a working stream. */
   streaming: boolean
+  /** Body returned for a non-bridge URL, i.e. the reader's document. */
+  document: string
   answerAsk: (answer: string | undefined) => void
   advance: (ms: number) => Promise<void>
   readState: (key: string) => unknown
@@ -86,11 +88,13 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     frameFailures: number
     framePollFailures: number
     streaming: boolean
+    document: string
   } = {
     failHealth: false,
     frameFailures: 0,
     framePollFailures: 0,
     streaming: true,
+    document: '<title>Reader fixture</title><h1>Reader fixture</h1><p>hello</p>',
   }
   mock.store(on)
   mock.env(on, options.env ?? {})
@@ -141,6 +145,10 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     const path = url.pathname
     const method = init.method ?? 'GET'
     const body = init.body ? JSON.parse(init.body) : {}
+    // A non-bridge URL is the reader's document fetch, not the bridge protocol.
+    if (url.origin !== 'http://127.0.0.1:1') {
+      return value({ status: 200, ok: true, headers: {}, text: bottomRef.document })
+    }
     if (path === '/health') {
       const ok = !bottomRef?.failHealth
       return value({ status: ok ? 200 : 503, ok, headers: {}, text: JSON.stringify({ ok, url: page.url, title: page.title }) })
@@ -371,6 +379,12 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     },
     set streaming(next: boolean) {
       bottomRef.streaming = next
+    },
+    get document() {
+      return bottomRef.document
+    },
+    set document(next: string) {
+      bottomRef.document = next
     },
     answerAsk: answer => {
       askAnswer = answer
