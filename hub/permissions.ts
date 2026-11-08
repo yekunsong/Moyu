@@ -90,6 +90,7 @@ export function decide(
   action: Action,
   actor: 'person' | 'model',
   grant: SessionGrant,
+  href?: string,
 ): Decision {
   const classification = classify(action)
 
@@ -114,6 +115,31 @@ export function decide(
       return { effect: 'confirm', reason: `${url.hostname} is not on the allowed-hosts list` }
     }
     return { effect: 'allow', reason: 'host is on the allowed-hosts list' }
+  }
+
+  // A click on a link is a navigation hidden inside a write: classify its
+  // destination before the browser gets the event. An unlisted host asks even
+  // under `once`/`auto`; a denied scheme or host never runs at all.
+  if (href !== undefined && (action.kind === 'click' || action.kind === 'clickAt')) {
+    let url: URL
+    try {
+      url = new URL(href)
+    } catch {
+      return { effect: 'deny', reason: `not a URL: ${href}` }
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return { effect: 'deny', reason: `scheme ${url.protocol} is not allowed` }
+    }
+    if (grantMatches(grant.deniedHosts, url.hostname)) {
+      return { effect: 'deny', reason: 'host is denied for this session' }
+    }
+    if (!grantMatches(grant.hosts, url.hostname) && !hostAllowed(config, url.hostname)) {
+      return {
+        effect: 'confirm',
+        reason: `link to ${url.hostname} is not on the allowed-hosts list`,
+      }
+    }
+    // A granted or listed host falls through to the ordinary write decision.
   }
 
   if (actor === 'person') {

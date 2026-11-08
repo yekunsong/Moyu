@@ -74,6 +74,15 @@ export type Action =
   | { kind: 'forward' }
   | { kind: 'reload' }
 
+/** What a viewport point lands on, as the bridge describes a click. */
+export type Hit = {
+  x: number
+  y: number
+  desc: string
+  /** Absolute http(s) URL of the enclosing `a[href]`, when there is one. */
+  href?: string
+}
+
 export type ActResult = {
   ok: boolean
   changed?: boolean
@@ -128,4 +137,6 @@ export type Provider = {
   latestFrame?(since: number): Promise<FramePoll>
   /** Leave image mode: restore the viewport the other tiers expect. */
   stopFrame?(): Promise<void>
+  /** Describe a viewport point and any enclosing link, before clicking it. */
+  hitAt?(x: number, y: number): Promise<Hit>
 }

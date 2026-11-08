@@ -9,6 +9,7 @@ import type {
   Capabilities,
   Frame,
   FramePoll,
+  Hit,
   Provider,
   ProviderMeta,
   Snapshot,
@@ -117,6 +118,14 @@ export class BrowserProvider implements Provider {
     const endpoint = await this.supervisor.ensure()
     const at = Math.max(0, Math.floor(Number(since) || 0))
     return await fetchJson<FramePoll>(this.ops, `${endpoint.url}/frame?since=${at}`, endpoint.token)
+  }
+
+  async hitAt(x: number, y: number): Promise<Hit> {
+    const endpoint = await this.supervisor.ensure()
+    return await fetchJson<Hit>(this.ops, `${endpoint.url}/hit`, endpoint.token, {
+      method: 'POST',
+      body: { x, y },
+    })
   }
 
   async stopFrame(): Promise<void> {

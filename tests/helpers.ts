@@ -19,6 +19,14 @@ export type FakePage = {
   scrollCalls: Array<{ dx: number; dy: number }>
   clickAtCalls: Array<{ x: number; y: number }>
   waitCalls: Array<{ kind: string; selector?: string; text?: string; idleMs?: number; timeoutMs?: number }>
+  /** Every action sent to /act, in order. */
+  actCalls: Array<Record<string, unknown>>
+  /** Every point described by /hit, in order. */
+  hitCalls: Array<{ x: number; y: number }>
+  /** What /hit reports under the point: an enclosing link's href. */
+  hitHref?: string
+  /** When set, the next /act lands on this URL, as page script would. */
+  scriptNavigate?: string
 }
 
 export type Bottom = {
@@ -63,6 +71,8 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     scrollCalls: [],
     clickAtCalls: [],
     waitCalls: [],
+    actCalls: [],
+    hitCalls: [],
   }
   const asks: string[] = []
   const fetches: string[] = []
@@ -216,6 +226,14 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
         }),
       })
     }
+    if (path === '/hit') {
+      const x = Math.max(0, Math.round(Number(body.x) || 0))
+      const y = Math.max(0, Math.round(Number(body.y) || 0))
+      page.hitCalls.push({ x, y })
+      const hit: Record<string, unknown> = { x, y, desc: 'target' }
+      if (page.hitHref) hit.href = page.hitHref
+      return value({ status: 200, ok: true, headers: {}, text: JSON.stringify(hit) })
+    }
     if (path === '/snapshot') {
       const text = JSON.stringify({
         url: page.url,
@@ -244,6 +262,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
           },
           { ref: 't5', role: 'link', name: 'Frame page', depth: 1, interactive: true, href: 'http://127.0.0.1:1/frame.html', bounds: { x: 0, y: 7, w: 10, h: 1 } },
           { ref: 't6', role: 'checkbox', name: 'Done: Buy milk', depth: 1, interactive: true, state: { checked: page.checked['t6'] ?? false }, bounds: { x: 0, y: 8, w: 2, h: 1 } },
+          { ref: 't7', role: 'link', name: 'External link', depth: 1, interactive: true, href: 'https://offsite.test/page', bounds: { x: 0, y: 9, w: 10, h: 1 } },
           // Enough filler to overflow the pane window, placed after the rows the
           // existing tests reach for.
           ...Array.from({ length: 30 }, (_, index) => ({
@@ -259,6 +278,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
       return value({ status: 200, ok: true, headers: {}, text })
     }
     if (path === '/act') {
+      page.actCalls.push(body)
       if (body.kind === 'wait') {
         page.waitCalls.push({
           kind: 'wait',
@@ -303,6 +323,12 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
       if (body.kind === 'scroll') page.scrollCalls.push({ dx: Number(body.dx) || 0, dy: Number(body.dy) || 0 })
       if (body.kind === 'clickAt') page.clickAtCalls.push({ x: Number(body.x), y: Number(body.y) })
       if (body.kind === 'navigate') page.url = body.url
+      // A page script can navigate as a side effect of any action; this flag
+      // models that so the hub's post-hoc containment can be exercised.
+      if (page.scriptNavigate) {
+        page.url = page.scriptNavigate
+        page.scriptNavigate = undefined
+      }
       return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, changed: true, message: `did ${body.kind}` }) })
     }
     if (path === '/stop') return value({ status: 200, ok: true, headers: {}, text: '{"ok":true}' })

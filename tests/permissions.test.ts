@@ -80,6 +80,66 @@ test('session grants override the config for navigation', () => {
   expect(decide(config, { kind: 'navigate', url: 'https://docs.example.org/' }, 'model', wildcard).effect).toBe('allow')
 })
 
+test('a link href is judged before a click runs', () => {
+  const grant = newGrant()
+  const click = { kind: 'click' as const, ref: 't5' }
+  // A non-http scheme is denied even though the click itself is a valid write.
+  expect(decide(config, click, 'model', grant, 'javascript:alert(1)').effect).toBe('deny')
+  // A session-denied host never clicks.
+  grant.deniedHosts.add('evil.test')
+  expect(decide(config, click, 'model', grant, 'https://evil.test/x').effect).toBe('deny')
+})
+
+test('a person link click to an unlisted host asks too', () => {
+  const decision = decide(config, { kind: 'click', ref: 't5' }, 'person', newGrant(), 'https://unknown.test/')
+  expect(decision.effect).toBe('confirm')
+  // A denied host still blocks the person.
+  const grant = newGrant()
+  grant.deniedHosts.add('unknown.test')
+  expect(decide(config, { kind: 'click', ref: 't5' }, 'person', grant, 'https://unknown.test/').effect).toBe('deny')
+})
+
+test('an unlisted link destination is confirmed even under auto', () => {
+  const grant = newGrant()
+  grant.auto = true
+  const decision = decide(
+    configOf({ writePolicy: 'auto' }),
+    { kind: 'clickAt', x: 10, y: 20 },
+    'model',
+    grant,
+    'https://unknown.test/page',
+  )
+  expect(decision).toEqual({
+    effect: 'confirm',
+    reason: 'link to unknown.test is not on the allowed-hosts list',
+  })
+})
+
+test('a listed link destination follows the write policy', () => {
+  const click = { kind: 'click' as const, ref: 't5' }
+  const confirmConfig = configOf({ allowedHosts: 'example.com', writePolicy: 'confirm' })
+  expect(decide(confirmConfig, click, 'model', newGrant(), 'https://example.com/').effect).toBe('confirm')
+  const autoConfig = configOf({ allowedHosts: 'example.com', writePolicy: 'auto' })
+  expect(decide(autoConfig, click, 'model', newGrant(), 'https://example.com/').effect).toBe('allow')
+  // A click submits, so `once` still asks after its first write.
+  const grant = newGrant()
+  grant.onceWritten = true
+  const onceConfig = configOf({ allowedHosts: 'example.com', writePolicy: 'once' })
+  expect(decide(onceConfig, click, 'model', grant, 'https://example.com/').effect).toBe('confirm')
+})
+
+test('session grants override the link allowlist', () => {
+  const click = { kind: 'click' as const, ref: 't5' }
+  const granted = newGrant()
+  granted.hosts.add('elsewhere.test')
+  expect(decide(configOf({ writePolicy: 'auto' }), click, 'model', granted, 'https://elsewhere.test/x').effect).toBe('allow')
+
+  // A session deny outranks a config-allowed destination.
+  const denied = newGrant()
+  denied.deniedHosts.add('example.com')
+  expect(decide(config, click, 'model', denied, 'https://example.com/').effect).toBe('deny')
+})
+
 test('classification marks submits', () => {
   expect(classify({ kind: 'check', ref: 't1' }).submits).toBe(false)
   expect(classify({ kind: 'uncheck', ref: 't1' }).level).toBe('write')

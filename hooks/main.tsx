@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Ops } from '../engine/ops'
-import { EMPTY_VIEW, Hub, normaliseKey, type ViewModel, type ViewRow } from '../hub/hub'
+import { EMPTY_VIEW, Hub, hostOfUrl, normaliseKey, type ViewModel, type ViewRow } from '../hub/hub'
 import { detectImageTier, negotiate, type ImageTier } from '../hub/negotiate'
 import type { Frame } from '../providers/browser/contract'
 import { glyphFor, pressRow } from '../providers/browser/rows'
@@ -251,23 +251,7 @@ export const register: Register = (on, options) => {
         }
       }
       const allowed = verb === 'allow'
-      // The two sets are exclusive: a later grant reverses an earlier one.
-      if (allowed) {
-        transom.grant.deniedHosts.delete(host)
-        transom.grant.hosts.add(host)
-      } else {
-        transom.grant.hosts.delete(host)
-        transom.grant.deniedHosts.add(host)
-      }
-      await transom.audit.log({
-        actor: 'person',
-        provider: 'browser',
-        action: `${verb} ${host}`,
-        url: transom.view.url,
-        policy: 'person',
-        ok: true,
-        message: `session host ${allowed ? 'allowed' : 'denied'}`,
-      })
+      await transom.grantHost(host, allowed)
       return { text: `${allowed ? 'Allowed' : 'Denied'} ${host} for this session.` }
     }
 
@@ -467,12 +451,34 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    // A page script that leaves the allowlist gets a visible, auditable banner
+    // with two ways out: undo the navigation, or trust the host for this session.
+    const warning = model.warning ? (
+      <Box flexDirection="row" gap={1}>
+        <Text color="yellow">! {clip(model.warning, Math.max(0, width - 24))}</Text>
+        <Button key="warn-back" plain onPress={() => void transom.act({ kind: 'back' }, 'person')}>
+          <Text dimColor>back</Text>
+        </Button>
+        <Button
+          key="warn-allow"
+          plain
+          onPress={() => {
+            const host = hostOfUrl(model.url)
+            if (host) void transom.grantHost(host, true)
+          }}
+        >
+          <Text dimColor>allow host</Text>
+        </Button>
+      </Box>
+    ) : null
+
     if (model.status === 'error') {
       return (
         <Box flexDirection="column" width="100%">
           {header}
           <Text color="red">error: {model.error ?? 'unknown'}</Text>
           <Button key="retry" onPress={() => void retry(ops, transom)}>Retry</Button>
+          {warning}
           {toolbar}
           {model.audit.map((line, index) => (
             <Text key={`a${index}`} dimColor>{line}</Text>
@@ -495,6 +501,7 @@ export const register: Register = (on, options) => {
               <Text dimColor>↺ {url}</Text>
             </Button>
           ))}
+          {warning}
           {toolbar}
           <Text key="status" dimColor>{statusLine(model, 0, width)}</Text>
           <Client key="keys" module="../providers/browser/keys.tsx" props={{ focused: e.props.isFocused }} height={1} width={width} />
@@ -508,6 +515,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" width="100%">
           {header}
+          {warning}
           {toolbar}
           <Raster key="shot" columns={rasterCols} rows={rasterRows} cells={shot.cells} />
           <Text key="status" dimColor>{statusLine(model, model.rows.length, width)}</Text>
@@ -521,6 +529,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" width="100%">
           {header}
+          {warning}
           {toolbar}
           <Box position="relative" width={width} height={frameRows}>
             <Image
@@ -563,6 +572,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" width="100%">
         {header}
+        {warning}
         {toolbar}
         {shown.map(row => {
           if (row.role === 'section') {

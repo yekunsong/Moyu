@@ -220,6 +220,40 @@ test('clickAt clicks at viewport pixels and clamps out-of-bounds points', async 
   assert.match(clamped.body.message, /at 0,0$/)
 })
 
+test('/hit describes the point and clamps out-of-bounds coordinates', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  const inc = snap.nodes.find(node => node.name === 'Increase count')
+  assert.ok(inc, 'increase button present')
+  const x = Math.round(inc.bounds.x + inc.bounds.w / 2)
+  const y = Math.round(inc.bounds.y + inc.bounds.h / 2)
+
+  const hit = await json('/hit', { x, y })
+  assert.equal(hit.status, 200)
+  assert.equal(hit.body.x, x)
+  assert.equal(hit.body.y, y)
+  assert.match(hit.body.desc, /Increase count/)
+  assert.equal(hit.body.href, undefined, 'a button is not a link')
+
+  const clamped = await json('/hit', { x: -50, y: -50 })
+  assert.equal(clamped.status, 200)
+  assert.equal(clamped.body.x, 0)
+  assert.equal(clamped.body.y, 0)
+})
+
+test('/hit finds an enclosing anchor and resolves its href', async () => {
+  await json('/navigate', { url: demo.url })
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  const link = snap.nodes.find(node => node.role === 'link' && node.name.includes('Frame page'))
+  assert.ok(link, 'frame page link present')
+  const x = Math.round(link.bounds.x + link.bounds.w / 2)
+  const y = Math.round(link.bounds.y + link.bounds.h / 2)
+
+  const hit = await json('/hit', { x, y })
+  assert.equal(hit.status, 200)
+  assert.match(hit.body.href, /^http:\/\/127\.0\.0\.1:\d+\/frame\.html$/)
+})
+
 test('shadow DOM and same-origin frames are reachable', async () => {
   await json('/navigate', { url: demo.url })
   const snap = (await json('/snapshot', { scope: 'document', maxChars: 200000 })).body

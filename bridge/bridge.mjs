@@ -14,7 +14,7 @@ import { timingSafeEqual } from 'node:crypto'
 
 import { Cdp } from './cdp.mjs'
 import { findBrowser } from './paths.mjs'
-import { ACT, INSTALL, SNAPSHOT } from './page-agent.mjs'
+import { ACT, HIT, INSTALL, SNAPSHOT } from './page-agent.mjs'
 
 const TOKEN = process.env.TRANSOM_TOKEN
 if (!TOKEN) {
@@ -432,6 +432,13 @@ async function waitNetworkIdle(timeoutMs, idleMs) {
   }
 }
 
+// POST /hit and clickAt share one page-side description. A caller that wants
+// to preflight a click resolves the anchor here before dispatching any event.
+async function hitPoint(point) {
+  const wanted = JSON.stringify({ x: Number(point?.x), y: Number(point?.y) })
+  return await evalInPage(`(${HIT})(${wanted})`)
+}
+
 async function actInner(action) {
   if (action.kind === 'wait') {
     const timeoutMs = clampTimeout(action.timeoutMs)
@@ -473,23 +480,7 @@ async function actInner(action) {
   if (action.kind === 'clickAt') {
     // CSS pixels in the page viewport: clamp first, then describe what the
     // point really hits so a misclick stays reviewable in the audit.
-    const wanted = JSON.stringify({ x: Number(action.x), y: Number(action.y) })
-    const hit = await evalInPage(`(() => {
-      const wanted = ${wanted}
-      const clamp = (value, max) => Math.max(0, Math.min(Math.round(Number.isFinite(value) ? value : 0), max - 1))
-      const x = clamp(wanted.x, innerWidth)
-      const y = clamp(wanted.y, innerHeight)
-      const el = document.elementFromPoint(x, y)
-      let desc = 'nothing'
-      if (el) {
-        const tag = el.tagName.toLowerCase()
-        const id = el.id ? '#' + el.id : ''
-        const aria = el.getAttribute && el.getAttribute('aria-label')
-        const text = String(aria || el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim()
-        desc = (tag + id + (text ? ' ' + text : '')).slice(0, 80)
-      }
-      return { x, y, desc }
-    })()`)
+    const hit = await hitPoint(action)
     await cmd('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hit.x, y: hit.y })
     await cmd('Input.dispatchMouseEvent', { type: 'mousePressed', x: hit.x, y: hit.y, button: 'left', buttons: 1, clickCount: 1 })
     await cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', x: hit.x, y: hit.y, button: 'left', buttons: 0, clickCount: 1 })
@@ -903,6 +894,7 @@ const ROUTES = {
   'GET /health': async () => await health(),
   'POST /snapshot': async body => await snapshot(body),
   'POST /act': async body => await act(body.action ?? body),
+  'POST /hit': async body => await hitPoint(body),
   'POST /navigate': async body => {
     const url = checkUrl(body.url)
     await navigate(url)

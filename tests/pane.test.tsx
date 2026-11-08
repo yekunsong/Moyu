@@ -124,6 +124,29 @@ test('a person press runs without a confirmation prompt', async ($, on) => {
   await ui.unmount()
 })
 
+test('a person click on an off-list link asks before navigating', async ($, on) => {
+  const bottom = installBottom(on)
+  bottom.answerAsk('Deny')
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  const before = bottom.page.actCalls.length
+  await ui.press({ key: 't7' })
+  expect(bottom.asks.length).toBe(1)
+  expect(bottom.asks[0] ?? '').toContain('offsite.test')
+  expect(bottom.page.actCalls.length, 'denied click never ran').toBe(before)
+  await ui.unmount()
+})
+
 test('visual mode draws a Raster and toggles back to text', async ($, on) => {
   const bottom = installBottom(on)
   load(on)
@@ -754,5 +777,126 @@ test('an invalid field draws its error text under the row', async ($, on) => {
   // The field itself stays an Input, never a Button.
   expect(await ui.find({ type: 'Input', key: 't2' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 't2' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a click on an off-list link asks and a denial never clicks', async ($, on) => {
+  const bottom = installBottom(on)
+  bottom.answerAsk('Deny')
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const before = bottom.page.actCalls.length
+  const clicked = await tool($, 'browser_act', { kind: 'click', ref: 't7' })
+  expect(clicked.text ?? '').toContain('denied')
+  expect(bottom.asks.at(-1) ?? '').toContain('https://offsite.test/page')
+  expect(bottom.asks.at(-1) ?? '').toContain('offsite.test')
+  // The page never saw the click.
+  expect(bottom.page.actCalls.length).toBe(before)
+})
+
+test('a click on an allowed link follows the write policy', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const clicked = await tool($, 'browser_act', { kind: 'click', ref: 't5' })
+  expect(clicked.text ?? '').toContain('ok')
+  expect(bottom.asks.length).toBe(1)
+  expect(bottom.asks[0] ?? '').toContain('submit action')
+  expect(bottom.asks[0] ?? '').toContain('frame.html')
+  expect(bottom.page.actCalls.at(-1)).toEqual({ kind: 'click', ref: 't5' })
+})
+
+test('an allowed link click runs without a prompt under auto', { options: { writePolicy: 'auto' } }, async ($, on) => {
+  const bottom = installBottom(on)
+  load(on, { writePolicy: 'auto' })
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const clicked = await tool($, 'browser_act', { kind: 'click', ref: 't5' })
+  expect(clicked.text ?? '').toContain('ok')
+  expect(bottom.asks).toEqual([])
+})
+
+test('a clickAt that lands on an off-list link asks before clicking', async ($, on) => {
+  const bottom = installBottom(on)
+  bottom.page.hitHref = 'https://offsite.test/landing'
+  bottom.answerAsk('Deny')
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const before = bottom.page.actCalls.length
+  const clicked = await tool($, 'browser_act', { kind: 'clickAt', x: 100, y: 50 })
+  expect(clicked.text ?? '').toContain('denied')
+  expect(bottom.page.hitCalls.length).toBeGreaterThan(0)
+  expect(bottom.asks.at(-1) ?? '').toContain('https://offsite.test/landing')
+  expect(bottom.page.actCalls.length).toBe(before)
+})
+
+test('a script navigation to an unlisted host warns, audits escaped and offers back', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  // The click itself is an allowed local write; page script then navigates.
+  bottom.page.scriptNavigate = 'https://scripted.test/landing'
+  const clicked = await tool($, 'browser_act', { kind: 'click', ref: 't1' })
+  expect(clicked.text ?? '').toContain('ok')
+
+  const audit = await command($, 'audit')
+  expect(audit.text ?? '').toContain('escaped')
+  expect(audit.text ?? '').toContain('scripted.test')
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  expect(await ui.find({ type: 'Text', text: /scripted\.test/ }), 'warning line').toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'warn-back' }), 'back button').toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'warn-allow' }), 'allow host button').toBeDefined()
+
+  const before = bottom.page.actCalls.length
+  await ui.press({ key: 'warn-back' })
+  expect(bottom.page.actCalls.length).toBe(before + 1)
+  expect(bottom.page.actCalls.at(-1)?.kind).toBe('back')
+  await ui.unmount()
+})
+
+test('the warning allow host button adds a session grant', async ($, on) => {
+  const bottom = installBottom(on)
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  bottom.page.scriptNavigate = 'https://scripted.test/landing'
+  await tool($, 'browser_act', { kind: 'click', ref: 't1' })
+  const asksAfterClick = bottom.asks.length
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'warn-allow' })
+  await bottom.advance(16)
+  expect(await ui.find({ type: 'Text', text: /not on the allowed-hosts list/ })).toBeUndefined()
+
+  // The session grant lets the same host navigate without a confirmation.
+  const navigated = await tool($, 'browser_act', { kind: 'navigate', url: 'https://scripted.test/other' })
+  expect(navigated.text ?? '').toContain('ok')
+  expect(bottom.asks.length).toBe(asksAfterClick)
+  expect(bottom.page.url).toBe('https://scripted.test/other')
   await ui.unmount()
 })

@@ -27,6 +27,8 @@ export type TransomView = {
   audit: string[]
   scope: 'viewport' | 'document'
   mode: 'text' | 'visual' | 'image'
+  /** Set when the page reached an unlisted or denied host by itself. */
+  warning?: string
 }
 
 declare module 'claude-code' {

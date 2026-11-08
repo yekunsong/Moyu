@@ -69,7 +69,7 @@ Moving the window into the terminal is a side effect. The product is **structure
 - **One channel for people and models.** The pane and `mcp__transom__*` tools feed the same serial action queue; every action records actor, target, policy, result and duration.
 - **Structured snapshots, not screenshots.** A stable-ref object graph with roles, accessible names, values, state and bounds. Refs carry a document generation, so navigation cannot silently rebind them; stale refs return `stale` instead of clicking the wrong thing.
 - **Provider framework.** Capability negotiation, supervisor, allowlists and rendering live in the hub; the browser is the first adapter, not the only possible one.
-- **Permissioned by default.** http(s)-only navigation, host allowlist (`localhost` always), model writes confirmed per action (or `once`/`auto`), exact-label approval, fail-closed confirmations.
+- **Permissioned by default.** http(s)-only navigation, host allowlist (`localhost` always), model writes confirmed per action (or `once`/`auto`), exact-label approval, fail-closed confirmations. A link click or `clickAt` preflights its destination before the click, and a page-script navigation to an unlisted host raises an audited `escaped` warning with **back** and **allow host**.
 - **Audited.** Human and model actions land in the same ring buffer and in `$.store`; fill text is redacted.
 - **Three rendering tiers.** Text (buttons, inputs and sections, any terminal), colored cells (half-block Raster, 24-bit color) and HQ images (real PNG frames on kitty, Ghostty, WezTerm). Degrades to a summary line in narrow panes.
 - **Inline editing and structure.** Text fields and selects edit in place; rows group under page headings with a status bar and block navigation.
@@ -162,7 +162,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 ## Pane controls
 
 - **Mouse** requires the fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`); inline panes support keyboard focus only.
-- Clicking a row executes immediately (a person can see the page). Model writes are confirmed according to `writePolicy`.
+- Clicking a row executes immediately (a person can see the page); a row that links to a host outside the allowlist asks first, for a person and for the model. Model writes are confirmed according to `writePolicy`.
 - Text fields and selects are edited inline: type and press Enter, or pick an option; no dialog.
 - Rows are grouped under page headings with a fixed status bar; `↓ next block` scrolls the page when the snapshot is longer than the pane.
 - `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm) streamed from Chrome and polled every 250 ms while the pane has focus (1 s otherwise), and clicking the picture clicks the page; both return to text with another press. When the stream has been still for ~2 seconds the pane takes one sharp still at `hqDetail`, and motion resumes the cheap stream. hq renders at a desktop width and physical pixel density (see `hqDetail`), so entering it changes the viewport and leaves the visible snapshot stale until the next refresh.
@@ -238,7 +238,7 @@ Reusable refs must come from the application's own object identity, not coordina
 
 See [`docs/SECURITY.md`](docs/SECURITY.md). In short: the bridge is a loopback HTTP service guarded by a per-start random bearer token and rejects browser `Origin`; Chrome runs with a throwaway profile (attach mode instead uses the browser you started); navigation is http(s)-only and host-allowlisted; password values are masked; page text is untrusted data, never instructions; every action is audited.
 
-Known non-goal: a model click on a link can navigate to a host outside the allowlist as a side effect. Under `confirm`/`once` the click itself is confirmed; `auto` gives that protection up.
+Links and `clickAt` are preflighted: a click whose destination is off-list is confirmed before it runs, even under `once`/`auto`, and a denied scheme or host never clicks. A navigation the page performs by itself — a script redirect, or a form submit caused by `press Enter` — cannot be preflighted; the hub compares the host after the action, audits it as `escaped`, and shows a warning with **back** and **allow host**.
 
 ## Engine notes
 

@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - HQ frames render at a desktop width (1100 px floor, aspect borrowed from the cell box) at 1–3× physical density (`hqDetail`, default 2); leaving image mode restores the cell-box viewport via `POST /frame/stop`.
 - HQ streams through Chrome's screencast: the pane polls for newer generations every 250 ms while focused and once a second otherwise, takes one sharp still after about two seconds of quiet, and falls back to one-second stills when the target refuses to stream.
+- Link clicks and `clickAt` preflight their destination before dispatch: a denied scheme or host never clicks, an unlisted host asks even under `once`/`auto`, and a page-script navigation to a denied or unlisted host is audited as `escaped` with a **back** / **allow host** warning.
 
 ### Fixed
 

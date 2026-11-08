@@ -14,6 +14,7 @@
 |---|---|---|
 | Bridge HTTP | Another local process calls `/act` | Random bearer token; loopback only; token exists only in the child env and plugin memory; browser `Origin` rejected |
 | Page script | DOM text tricks the model into clicking external links, filling forms or submitting | Snapshots are labelled untrusted; navigation validates scheme/host; writes are confirmed; audit is reviewable |
+| Link clicks and `clickAt` | A click navigates to an off-list host before the snapshot catches it | The href is resolved inside the queued action (from the node for `click`, `POST /hit` for `clickAt`) and the scheme/host decision runs before dispatch; an unlisted destination is confirmed even under `once`/`auto`; a denial never clicks |
 | Navigation | `javascript:` / `data:` / `file:` reads local files | Only http/https; `file:` always denied; host allowlist |
 | Forms | Passwords leak into snapshots | Password fields (including case variants) always report `••••` and never use their value as an accessible name |
 | Clicking | Hit an invisible or overlaid element | Snapshots include visible nodes only; `scrollIntoView` plus an `elementFromPoint` hit test returns `covered` instead of a false success; CDP dispatches real mouse events |
@@ -23,7 +24,7 @@
 
 ## 3. Explicit non-goals
 
-- **Link navigations.** When the model clicks a link to a host outside the allowlist, the navigation happens inside the click action and does not pass through the `navigate` allowlist branch. Under `confirm`/`once` the click itself is confirmed; `auto` gives that protection up. Do not use `auto` when this matters.
+- **Page-initiated navigation.** A link click and `clickAt` are preflighted, but a navigation the page performs itself — a script redirect, or a form submit caused by `press Enter` — cannot be seen before it happens. The hub compares the host after every successful write and refresh; a denied or unlisted destination produces an audited `escaped` entry and a pane warning with **back** and **allow host**. This is a backstop, not prevention; do not rely on it under `auto`.
 - A page sending data to third parties (normal browser behaviour).
 - An attacker who already controls the machine and can read the bridge child's environment.
 - A model performing a harmful-but-consented action on a page the person approved.
@@ -36,7 +37,8 @@
 - [ ] Every POST route validates `Authorization: Bearer`.
 - [ ] Navigation allows only `http:`/`https:`.
 - [ ] Password values are masked.
-- [ ] Audit covers `snapshot`, `act`, `screenshot`, denials and failures.
+- [ ] Audit covers `snapshot`, `act`, `screenshot`, denials, failures and post-hoc `escaped` navigations.
+- [ ] Link clicks and `clickAt` preflight their destination before the click runs.
 - [ ] Temporary profiles are removed after `stop`.
 - [ ] Attach mode never launches or closes Chrome: `/stop` detaches and the browser keeps running.
 - [ ] Documentation states that page text is untrusted.

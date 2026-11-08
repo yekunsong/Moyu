@@ -2,10 +2,10 @@
 // confirmation, audit, execution, refresh. Serial by construction.
 import { ask, storeGet, storeSet } from '../engine/adapter'
 import type { Ops } from '../engine/ops'
-import type { Action, ActResult, Frame, Snapshot } from '../providers/browser/contract'
+import type { Action, ActResult, Frame, Hit, Snapshot } from '../providers/browser/contract'
 import { BrowserProvider } from '../providers/browser/client'
 import { Audit } from './audit'
-import { classify as classificationOf, configOf, decide, describeAction, newGrant, type Config, type SessionGrant } from './permissions'
+import { classify as classificationOf, configOf, decide, describeAction, grantMatches, hostAllowed, newGrant, type Config, type SessionGrant } from './permissions'
 
 export type ViewRow = {
   ref: string
@@ -36,6 +36,8 @@ export type ViewModel = {
   audit: string[]
   scope: 'viewport' | 'document'
   mode: 'text' | 'visual' | 'image'
+  /** Set when the page reached an unlisted or denied host by itself. */
+  warning?: string
 }
 
 export const EMPTY_VIEW: ViewModel = {
@@ -227,7 +229,16 @@ export class Hub {
     // Decision, confirmation and execution are one critical section: a person's
     // click cannot land between a model's confirmation and its execution.
     return await this.enqueue(async () => {
-      const decision = decide(this.config, action, actor, this.grant)
+      // Resolve a click's destination inside the queue, before the decision: a
+      // model click or clickAt must not reach an off-list host unnoticed.
+      let href: string | undefined
+      if (action.kind === 'click') {
+        href = this.#lastSnapshot?.nodes.find(node => node.ref === action.ref)?.href
+      } else if (action.kind === 'clickAt') {
+        const hit = await this.hitAt(action.x, action.y)
+        href = hit?.href
+      }
+      const decision = decide(this.config, action, actor, this.grant, href)
       if (decision.effect === 'deny') {
         const entry = await this.audit.log({
           actor, provider: 'browser', action: describeAction(action), url: this.#view.url,
@@ -238,7 +249,7 @@ export class Hub {
 
       let policy: string = decision.effect
       if (decision.effect === 'confirm') {
-        const targetName = targetLabel(action, this.#lastSnapshot)
+        const targetName = targetLabel(action, this.#lastSnapshot, href)
         const answer = await ask(
           this.ops,
           `Transom: allow ${describeAction(action)}${targetName} on "${clean(this.#view.title || this.#view.url)}"? (${clean(decision.reason)})`,
@@ -258,6 +269,10 @@ export class Hub {
 
       if (actor === 'model' && classificationOf(action).level === 'write') this.grant.onceWritten = true
 
+      // Remember where we were so a page-driven navigation can be compared
+      // with the host the person approved.
+      const beforeHost = hostOfUrl(this.#view.url)
+      const targetHost = href ? hostOfUrl(href) : action.kind === 'navigate' ? hostOfUrl(action.url) : undefined
       const started = Date.now()
       const auditId = await this.audit.begin(actor, 'browser', describeAction(action), policy, this.#view.url)
       this.#setView({ last: `${actor === 'model' ? 'model' : 'you'}: ${describeAction(action)}` })
@@ -273,10 +288,82 @@ export class Hub {
       if (result.ok && (result.changed || action.kind === 'navigate')) {
         if (action.kind === 'navigate' && result.url) await this.#remember(result.url)
         await this.refresh()
+        await this.#checkEscape(action, actor, beforeHost, targetHost)
       }
       this.#setView({ audit: this.audit.recent(6).map(shortAudit) })
       return { result, auditId }
     })
+  }
+
+  /**
+   * Compare the host after a write with the host before it. A page script that
+   * navigates to a denied or unlisted host leaves an audited `escaped` entry
+   * and a pane warning; a navigation the person just approved is not a warning.
+   */
+  async #checkEscape(
+    action: Action,
+    actor: 'person' | 'model',
+    beforeHost: string | undefined,
+    targetHost: string | undefined,
+  ): Promise<void> {
+    const afterHost = hostOfUrl(this.#view.url)
+    if (!afterHost) return
+    if (targetHost && afterHost === targetHost) {
+      if (this.#view.warning) this.#setView({ warning: undefined })
+      return
+    }
+    if (afterHost === beforeHost) return
+    const denied = grantMatches(this.grant.deniedHosts, afterHost)
+    if (!denied && (grantMatches(this.grant.hosts, afterHost) || hostAllowed(this.config, afterHost))) {
+      if (this.#view.warning) this.#setView({ warning: undefined })
+      return
+    }
+    const reason = denied ? 'is denied for this session' : 'is not on the allowed-hosts list'
+    await this.audit.log({
+      actor, provider: 'browser', action: `escaped ${describeAction(action)}`,
+      url: this.#view.url, policy: 'deny', ok: false,
+      message: `reached ${afterHost}, which ${reason}`,
+    })
+    this.#setView({
+      warning: `the page navigated to ${afterHost}, which ${reason}. Go back, or allow the host for this session.`,
+      audit: this.audit.recent(6).map(shortAudit),
+    })
+  }
+
+  /** Allow or deny a host for this session, as `/transom allow|deny` does. */
+  async grantHost(host: string, allowed: boolean): Promise<void> {
+    const needle = host.trim().toLowerCase()
+    if (!needle) return
+    // The two sets are exclusive: a later grant reverses an earlier one.
+    if (allowed) {
+      this.grant.deniedHosts.delete(needle)
+      this.grant.hosts.add(needle)
+    } else {
+      this.grant.hosts.delete(needle)
+      this.grant.deniedHosts.add(needle)
+    }
+    await this.audit.log({
+      actor: 'person',
+      provider: 'browser',
+      action: `${allowed ? 'allow' : 'deny'} ${needle}`,
+      url: this.#view.url,
+      policy: 'person',
+      ok: true,
+      message: `session host ${allowed ? 'allowed' : 'denied'}`,
+    })
+    this.#setView({ warning: undefined, audit: this.audit.recent(6).map(shortAudit) })
+  }
+
+  /** Describe a viewport point; undefined when the provider cannot. */
+  async hitAt(x: number, y: number): Promise<Hit | undefined> {
+    if (typeof this.provider.hitAt !== 'function') return undefined
+    try {
+      return await this.provider.hitAt(x, y)
+    } catch {
+      // A failed probe is not a reason to refuse the click; the post-hoc
+      // containment still compares the host afterwards.
+      return undefined
+    }
   }
 
   async refresh(scope: 'viewport' | 'document' = this.#view.scope): Promise<Snapshot | undefined> {
@@ -605,14 +692,26 @@ function optionsText(options: Array<{ value: string; label: string; selected?: b
   return `options=[${parts.join(', ')}]`
 }
 
-function targetLabel(action: Action, snapshot: Snapshot | undefined): string {
-  if (!snapshot || !('ref' in action)) return ''
-  const node = snapshot.nodes.find(one => one.ref === action.ref)
-  if (!node) return ''
-  const name = node.name ? ` "${clean(node.name)}"` : ''
+function targetLabel(action: Action, snapshot: Snapshot | undefined, href?: string): string {
+  if (action.kind === 'clickAt') {
+    return href ? ` -> ${clean(href).slice(0, 120)}` : ''
+  }
+  if (action.kind !== 'click') return ''
+  const node = snapshot?.nodes.find(one => one.ref === action.ref)
   // A link's destination is part of what the person is approving.
-  const href = node.href ? ` -> ${clean(node.href).slice(0, 120)}` : ''
-  return `${name}${href}`
+  const dest = href ?? node?.href
+  const name = node?.name ? ` "${clean(node.name)}"` : ''
+  const destination = dest ? ` -> ${clean(dest).slice(0, 120)}` : ''
+  return `${name}${destination}`
+}
+
+/** The hostname of a URL, lowercased, or undefined when it does not parse. */
+export function hostOfUrl(url: string): string | undefined {
+  try {
+    return new URL(url).hostname.toLowerCase() || undefined
+  } catch {
+    return undefined
+  }
 }
 
 function clean(value: string): string {

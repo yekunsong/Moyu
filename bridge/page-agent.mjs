@@ -296,6 +296,37 @@ export const SNAPSHOT = String.raw`
 })
 `
 
+// One point description shared by clickAt and POST /hit, so the click and the
+// preflight can never disagree about what a coordinate lands on. The enclosing
+// anchor's href is resolved to an absolute URL and only http(s) survives.
+export const HIT = String.raw`
+(point => {
+  const clamp = (value, max) => Math.max(0, Math.min(Math.round(Number.isFinite(value) ? value : 0), max - 1))
+  const x = clamp(point && point.x, innerWidth)
+  const y = clamp(point && point.y, innerHeight)
+  const el = document.elementFromPoint(x, y)
+  let desc = 'nothing'
+  if (el) {
+    const tag = el.tagName.toLowerCase()
+    const id = el.id ? '#' + el.id : ''
+    const aria = el.getAttribute && el.getAttribute('aria-label')
+    const text = String(aria || el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim()
+    desc = (tag + id + (text ? ' ' + text : '')).slice(0, 80)
+  }
+  let href
+  const anchor = el && el.closest ? el.closest('a[href]') : null
+  if (anchor) {
+    const raw = anchor.getAttribute('href') || ''
+    // Non-http(s) destinations (javascript:, mailto:, data:) are left undefined
+    // so the caller treats the click as ordinary input.
+    try {
+      const url = new URL(raw, location.href)
+      if (url.protocol === 'http:' || url.protocol === 'https:') href = url.href
+    } catch {}
+  }
+  return href ? { x, y, desc, href } : { x, y, desc }
+})`
+
 export const ACT = String.raw`
 (action => {
   const query = globalThis.__transomQuery
