@@ -217,6 +217,11 @@ async function launchAttached(port) {
   await evalInPage(INSTALL)
   currentUrl = page?.url ?? 'about:blank'
   currentTitle = page?.title ?? ''
+  // Warm the compositor: an attached window is often behind the terminal, and
+  // without a forced frame the first hq capture can wait fifteen seconds for a
+  // BeginFrame that occlusion-suppressed Chrome never sends.
+  await cmd('Page.bringToFront').catch(() => {})
+  await capturePng(1, 4000).catch(() => {})
 }
 
 function isDevtoolsTarget(target) {
@@ -232,6 +237,14 @@ async function fetchJsonFromChrome(port, path) {
 function cmd(method, params = {}, timeoutMs) {
   if (!sessionId) return Promise.reject(new Error('no page session'))
   return cdp.send(method, params, sessionId, timeoutMs)
+}
+
+// Refs live on a page global that any document load wipes. Re-install it
+// before work that depends on the registry: a reload or a page-driven
+// navigation must not turn the next snapshot or click into a TypeError.
+async function ensureInstalled() {
+  const state = await evalInPage('globalThis.__transom ? "ok" : "missing"', false)
+  if (state !== 'ok') await evalInPage(INSTALL)
 }
 
 async function evalInPage(expression, awaitPromise = true) {
@@ -322,6 +335,7 @@ async function navigate(url) {
 }
 
 async function snapshot(request) {
+  await ensureInstalled()
   return evalInPage(
     `(${SNAPSHOT})(${JSON.stringify({ cols: VIEW_COLS, rows: VIEW_ROWS, ...request })})`,
   )
@@ -422,6 +436,7 @@ async function actInner(action) {
   }
   const simpleKinds = ['click', 'hover', 'fill', 'select', 'focus', 'check', 'uncheck']
   if (simpleKinds.includes(action.kind)) {
+    await ensureInstalled()
     const result = await evalInPage(`(${ACT})(${JSON.stringify(action)})`)
     if (result?.at) {
       const x = Math.round(result.at.x)
@@ -502,12 +517,14 @@ async function actInner(action) {
     const settled = waitSettled()
     await cmd('Page.navigateToHistoryEntry', { entryId: entry.id })
     await settled
+    await evalInPage(INSTALL).catch(() => {})
     return { ok: true, changed: true, message: `${action.kind} to ${entry.url}` }
   }
   if (action.kind === 'reload') {
     const settled = waitSettled()
     await cmd('Page.reload', {})
     await settled
+    await evalInPage(INSTALL).catch(() => {})
     return { ok: true, changed: true, message: 'reloaded' }
   }
   return { ok: false, changed: false, message: `unknown action ${action.kind}` }
@@ -610,12 +627,21 @@ async function raster(request) {
   }
 }
 
-async function capturePng() {
-  return await cmd('Page.captureScreenshot', {
-    format: 'png',
-    captureBeyondViewport: false,
-    fromSurface: true,
-  })
+// Chrome stops producing frames for an occluded window; the first capture after
+// attach often waits for one that never comes. A single retry forces the next
+// BeginFrame and almost always succeeds, so a minimised or covered window does
+// not turn into a dead hq mode.
+async function capturePng(attempt = 0, timeoutMs = undefined) {
+  try {
+    return await cmd(
+      'Page.captureScreenshot',
+      { format: 'png', captureBeyondViewport: false, fromSurface: true },
+      timeoutMs,
+    )
+  } catch (error) {
+    if (attempt >= 1) throw error
+    return await capturePng(attempt + 1, timeoutMs)
+  }
 }
 
 async function pageSize() {

@@ -326,6 +326,37 @@ test('hq draws an Image from the frame file on WezTerm', async ($, on) => {
   await ui.unmount()
 })
 
+test('hq rides out a dropped frame and gives up only after repeats', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'hq' })
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'image mode').toBeDefined()
+
+  // A covered window drops frames; two in a row must not end the mode.
+  bottom.frameFailures = 2
+  await bottom.advance(1100)
+  await bottom.advance(1100)
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'survived two drops').toBeDefined()
+
+  // The registry fails until a third consecutive frame: then the mode stops.
+  bottom.frameFailures = 5
+  await bottom.advance(1100)
+  await bottom.advance(1100)
+  await bottom.advance(1100)
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'gave up on the mode').toBeUndefined()
+  await ui.unmount()
+})
+
 test('the hq pointer overlay maps a click to page pixels', async ($, on) => {
   const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
   load(on)

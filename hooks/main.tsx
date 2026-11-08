@@ -45,6 +45,7 @@ let imageTier: ImageTier = { supported: false, reason: '' }
 let frameTimer: Timer | undefined
 let frameBusy = false
 let frameActive = false
+let frameFailures = 0
 let frameSize = { columns: 0, rows: 0 }
 
 let hub: Hub | undefined
@@ -722,6 +723,7 @@ async function startImage(
     url: transom.view.url,
   }
   frameActive = true
+  frameFailures = 0
   await update($, view, model => ({
     ...model,
     mode: 'image' as const,
@@ -747,6 +749,7 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
   frameBusy = true
   try {
     const frame = await provider.frame(frameSize.columns, frameSize.rows)
+    frameFailures = 0
     lastFrame = {
       file: frame.file,
       generation: frame.generation,
@@ -758,7 +761,14 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
     }
     void $.ui.invalidate('ui.render')
   } catch (error) {
+    // An occluded window or a busy page can drop one frame; only give up on
+    // the mode after the failure repeats.
+    if (frameFailures < 2) {
+      frameFailures += 1
+      return
+    }
     // One toast, then leave image mode: the text tier stays usable.
+    frameFailures = 0
     stopFrames()
     ops.toast(`hq: ${String((error as Error).message ?? error)}`)
     await update($, view, model => ({ ...model, mode: 'text' as const }))

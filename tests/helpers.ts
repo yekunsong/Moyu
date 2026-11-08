@@ -27,6 +27,8 @@ export type Bottom = {
   fetches: string[]
   spawns: number
   failHealth: boolean
+  /** Directory of /frame calls to fail with a 500, decremented per call. */
+  frameFailures: number
   answerAsk: (answer: string | undefined) => void
   advance: (ms: number) => Promise<void>
   readState: (key: string) => unknown
@@ -57,7 +59,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
   let askAnswer: string | undefined = 'Allow'
   let spawns = 0
   const clock = mock.clock(on)
-  const bottomRef: { failHealth: boolean } = { failHealth: false }
+  const bottomRef: { failHealth: boolean; frameFailures: number } = { failHealth: false, frameFailures: 0 }
   mock.store(on)
   mock.env(on, options.env ?? {})
   let frameGeneration = 0
@@ -119,6 +121,10 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
       let binary = ''
       for (const byte of bytes) binary += String.fromCharCode(byte)
       return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ cells: btoa(binary), columns, rows }) })
+    }
+    if (path === '/frame' && bottomRef.frameFailures > 0) {
+      bottomRef.frameFailures -= 1
+      return value({ status: 500, ok: false, headers: {}, text: JSON.stringify({ ok: false, error: 'capture timed out' }) })
     }
     if (path === '/frame') {
       // The render uses a file source, which the kit cannot create. The path
@@ -245,6 +251,12 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     },
     set failHealth(next: boolean) {
       bottomRef.failHealth = next
+    },
+    get frameFailures() {
+      return bottomRef.frameFailures
+    },
+    set frameFailures(next: number) {
+      bottomRef.frameFailures = next
     },
     answerAsk: answer => {
       askAnswer = answer

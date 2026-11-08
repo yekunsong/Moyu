@@ -380,6 +380,18 @@ test('refs do not rebind to elements on a new page', async () => {
   assert.equal(result.body.stale, true)
 })
 
+test('the page agent survives a reload', async () => {
+  await json('/navigate', { url: demo.url })
+  const reload = await json('/act', { action: { kind: 'reload' } })
+  assert.equal(reload.body.ok, true)
+  const after = await json('/snapshot', { scope: 'viewport', maxChars: 50000 })
+  assert.equal(after.status, 200, after.body.error)
+  const inc = after.body.nodes.find(node => node.name === 'Increase count')
+  assert.ok(inc, 'refs are rebuilt after the reload')
+  const click = await json('/act', { action: { kind: 'click', ref: inc.ref } })
+  assert.equal(click.body.ok, true)
+})
+
 test('a covered target is reported, not clicked through', async () => {
   await json('/navigate', { url: demo.url })
   const snap = (await json('/snapshot', { scope: 'document', maxChars: 200000 })).body

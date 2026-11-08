@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/). This project is early access; minor versions may change the engine-facing surface.
 
+## [Unreleased]
+
+### Fixed
+
+- Re-install the page agent after a document load, so a reload, back/forward or page-driven navigation no longer turns the next snapshot or ref action into a `TypeError`. Covered by a bridge regression test.
+- Attach mode forces a compositor frame on connect and retries a dropped capture once; hq image mode now rides out isolated dropped frames instead of falling back to text on the first one. Covered by a pane test.
+- The engine test kit can fail `/frame` on demand, so frame-loss handling is testable in memory.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added
