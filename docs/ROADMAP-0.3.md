@@ -24,9 +24,9 @@ Date: 2026-11-08
 **Implementation:**
 
 1. `POST /frame` takes `detail` (1–3, default from `hqDetail` config, default 2), and the provider method becomes `frame(cols, rows, detail)`. In owned mode the CSS viewport keeps the cell box's aspect ratio but is floored at 1100 px wide (`width = max(columns × 8, 1100)`, `height = width × rows × 16 / (columns × 8)`), so the page gets a desktop layout without distortion, and `deviceScaleFactor: detail` multiplies the capture to physical pixels.
-2. Cap the capture at 2560×2000; to fit, reduce `detail` first, then the width (whose height is derived), never one axis alone.
+2. Cap the capture at 3840×2560; to fit, reduce `detail` first, then the width (whose height is derived), never one axis alone.
 3. Return both the CSS mapping size (`pageWidth`, `pageHeight`) and the pixel size; the pane keeps using the CSS values in `clickPixel`.
-4. State the side effects in the docs: entering hq changes the viewport (a stale snapshot follows), and 2560×1440 PNGs are 1–3 MB each.
+4. State the side effects in the docs: entering hq changes the viewport (a stale snapshot follows), and the PNGs are 1–4 MB each. Add `POST /frame/stop` so leaving image mode restores the cell-box viewport.
 5. Leave `/shot` and `/raster` on their current cell-derived metrics so the text and visual tiers do not regress.
 6. Add an `hqDetail` userConfig option (1 = fast, 2 = default, 3 = sharp) and document its CPU and disk cost.
 

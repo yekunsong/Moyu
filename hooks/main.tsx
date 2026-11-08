@@ -46,6 +46,8 @@ let frameTimer: Timer | undefined
 let frameBusy = false
 let frameActive = false
 let frameFailures = 0
+/** Whether a frame capture left the page on the hq viewport. */
+let frameMetricsHeld = false
 let frameSize = { columns: 0, rows: 0 }
 
 let hub: Hub | undefined
@@ -664,6 +666,12 @@ function stopFrames(): void {
   frameTimer?.cancel()
   frameTimer = undefined
   frameBusy = false
+  // Image mode changes the owned page's viewport; going back to text puts the
+  // cell-box metrics back so snapshots match the pane again.
+  if (frameMetricsHeld) {
+    frameMetricsHeld = false
+    if (hub) void hub.stopFrame().catch(() => undefined)
+  }
 }
 
 async function toggleImage(
@@ -705,9 +713,11 @@ async function startImage(
     rows: Math.max(5, Math.floor(rows) - 9),
   }
   let frame: Frame
+  frameMetricsHeld = true
   try {
-    frame = await provider.frame(frameSize.columns, frameSize.rows)
+    frame = await transom.frame(frameSize.columns, frameSize.rows)
   } catch (error) {
+    stopFrames()
     ops.toast(`hq: ${String((error as Error).message ?? error)}`)
     await update($, view, model => ({ ...model, mode: 'text' as const }))
     void $.ui.invalidate('ui.render')
@@ -747,8 +757,9 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
   const provider = transom.provider
   if (!provider.frame) return
   frameBusy = true
+  frameMetricsHeld = true
   try {
-    const frame = await provider.frame(frameSize.columns, frameSize.rows)
+    const frame = await transom.frame(frameSize.columns, frameSize.rows)
     frameFailures = 0
     lastFrame = {
       file: frame.file,

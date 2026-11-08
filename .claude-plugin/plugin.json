@@ -31,6 +31,12 @@
       "title": "Snapshot character cap",
       "description": "Hard cap on a snapshot handed to the model.",
       "default": 12000
+    },
+    "hqDetail": {
+      "type": "number",
+      "title": "HQ capture detail",
+      "description": "Pixel density for hq frames: 1 (fast), 2 (default) or 3 (sharp). Higher detail costs CPU and disk.",
+      "default": 2
     }
   }
 }

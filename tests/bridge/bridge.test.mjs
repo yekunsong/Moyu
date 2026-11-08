@@ -28,6 +28,11 @@ async function json(path, body) {
   return { status: response.status, body: await response.json() }
 }
 
+function pngSize(file) {
+  const bytes = readFileSync(file)
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+}
+
 before(async () => {
   demo = await startDemo(0)
   bridge = spawn(process.execPath, ['bridge/bridge.mjs'], {
@@ -285,7 +290,7 @@ test('frame writes a real PNG file and prunes old generations', async () => {
   assert.equal(first.status, 200)
   assert.deepEqual(
     { columns: first.body.columns, rows: first.body.rows, pageWidth: first.body.pageWidth, pageHeight: first.body.pageHeight },
-    { columns: 40, rows: 12, pageWidth: 320, pageHeight: 192 },
+    { columns: 40, rows: 12, pageWidth: 1100, pageHeight: 660 },
   )
   assert.ok(existsSync(first.body.file), 'the frame file exists')
   const bytes = readFileSync(first.body.file)
@@ -309,9 +314,77 @@ test('frame clamps the requested cell box and caps the pixel size', async () => 
   const big = await json('/frame', { cols: 400, rows: 400 })
   assert.equal(big.body.columns, 200)
   assert.equal(big.body.rows, 120)
-  assert.ok(big.body.pageWidth <= 2000)
-  assert.ok(big.body.pageHeight <= 1200)
+  assert.ok(big.body.pageWidth <= 3840)
+  assert.ok(big.body.pageHeight <= 2560)
   assert.equal(existsSync(big.body.file), true)
+})
+
+test('frame captures at the requested detail and reports the real pixel size', async () => {
+  await json('/navigate', { url: demo.url })
+  const { status, body } = await json('/frame', { cols: 40, rows: 12, detail: 2 })
+  assert.equal(status, 200)
+  assert.equal(body.pixelWidth, 2 * body.pageWidth)
+  assert.equal(body.pixelHeight, 2 * body.pageHeight)
+  assert.deepEqual(pngSize(body.file), { width: body.pixelWidth, height: body.pixelHeight })
+
+  // Out-of-range detail clamps; 0 becomes 1x, an oversized value stays above 1x.
+  const one = await json('/frame', { cols: 20, rows: 5, detail: 0 })
+  assert.equal(one.body.pixelWidth, one.body.pageWidth)
+  assert.equal(one.body.pixelHeight, one.body.pageHeight)
+  const many = await json('/frame', { cols: 20, rows: 5, detail: 9 })
+  assert.ok(many.body.pixelWidth > many.body.pageWidth)
+  assert.ok(many.body.pixelHeight > many.body.pageHeight)
+})
+
+test('frame reduces detail before width when the capture is capped', async () => {
+  await json('/navigate', { url: demo.url })
+  const { status, body } = await json('/frame', { cols: 200, rows: 120, detail: 3 })
+  assert.equal(status, 200)
+  // 1600x1920 at detail 2 or 3 would overflow 3840x2560, so detail drops to 1
+  // and the width keeps the cell box's aspect ratio.
+  assert.equal(body.pageWidth, 1600)
+  assert.equal(body.pageHeight, 1920)
+  assert.equal(body.pixelWidth, body.pageWidth)
+  assert.equal(body.pixelHeight, body.pageHeight)
+  assert.ok(body.pixelWidth <= 3840)
+  assert.ok(body.pixelHeight <= 2560)
+  assert.deepEqual(pngSize(body.file), { width: body.pixelWidth, height: body.pixelHeight })
+})
+
+test('detail 3 is reachable on a normal pane and stop restores the viewport', async () => {
+  await json('/navigate', { url: demo.url })
+  const frame = await json('/frame', { cols: 100, rows: 30, detail: 3 })
+  assert.equal(frame.status, 200)
+  assert.equal(frame.body.pixelWidth, 3 * frame.body.pageWidth)
+  assert.equal(frame.body.pixelHeight, 3 * frame.body.pageHeight)
+
+  const stopped = await json('/frame/stop', {})
+  assert.equal(stopped.status, 200)
+  assert.equal(stopped.body.ok, true)
+  // Back to the cell-box metrics the text tier assumes.
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  assert.equal(snap.viewport.width, 110 * 8)
+})
+
+test('a click mapped through the frame CSS size hits the counter', async () => {
+  await json('/navigate', { url: demo.url })
+  const frame = await json('/frame', { cols: 100, rows: 30, detail: 2 })
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  // hq leaves its desktop viewport in place, so snapshot pixels are the CSS
+  // size the frame reported.
+  assert.equal(snap.viewport.width, frame.body.pageWidth)
+  assert.equal(snap.viewport.height, frame.body.pageHeight)
+
+  const inc = snap.nodes.find(node => node.name === 'Increase count')
+  assert.ok(inc, 'increase button present')
+  const x = Math.round(inc.bounds.x + inc.bounds.w / 2)
+  const y = Math.round(inc.bounds.y + inc.bounds.h / 2)
+  const clicked = await json('/act', { action: { kind: 'clickAt', x, y } })
+  assert.equal(clicked.body.ok, true)
+  assert.match(clicked.body.message, /Increase count/)
+
+  const after = (await json('/snapshot', { maxChars: 50000 })).body
+  assert.equal(after.nodes.find(node => node.role === 'status').name, '1')
 })
 
 test('a javascript alert is accepted, recorded and does not block the page', async () => {

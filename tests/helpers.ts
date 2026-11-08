@@ -25,6 +25,8 @@ export type Bottom = {
   page: FakePage
   asks: string[]
   fetches: string[]
+  /** Decoded bodies of every /frame call, for detail plumbing assertions. */
+  frameBodies: Array<Record<string, unknown>>
   spawns: number
   failHealth: boolean
   /** Directory of /frame calls to fail with a 500, decremented per call. */
@@ -56,6 +58,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
   }
   const asks: string[] = []
   const fetches: string[] = []
+  const frameBodies: Array<Record<string, unknown>> = []
   let askAnswer: string | undefined = 'Allow'
   let spawns = 0
   const clock = mock.clock(on)
@@ -122,6 +125,9 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
       for (const byte of bytes) binary += String.fromCharCode(byte)
       return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ cells: btoa(binary), columns, rows }) })
     }
+    if (path === '/frame/stop') {
+      return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true }) })
+    }
     if (path === '/frame' && bottomRef.frameFailures > 0) {
       bottomRef.frameFailures -= 1
       return value({ status: 500, ok: false, headers: {}, text: JSON.stringify({ ok: false, error: 'capture timed out' }) })
@@ -131,6 +137,8 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
       // does not need to exist for the tree assertion; see the pane test.
       const columns = Math.max(20, Math.min(Number(body.cols) || 20, 200))
       const rows = Math.max(5, Math.min(Number(body.rows) || 5, 120))
+      const detail = Math.max(1, Math.min(Math.round(Number(body.detail) || 2), 3))
+      frameBodies.push({ ...body, detail })
       frameGeneration += 1
       return value({
         status: 200,
@@ -141,8 +149,11 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
           generation: frameGeneration,
           columns,
           rows,
+          detail,
           pageWidth: columns * 8,
           pageHeight: rows * 16,
+          pixelWidth: columns * 8 * detail,
+          pixelHeight: rows * 16 * detail,
         }),
       })
     }
@@ -243,6 +254,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     page,
     asks,
     fetches,
+    frameBodies,
     get spawns() {
       return spawns
     },

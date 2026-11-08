@@ -104,12 +104,19 @@ export class BrowserProvider implements Provider {
     })
   }
 
-  async frame(cols: number, rows: number): Promise<Frame> {
+  async frame(cols: number, rows: number, detail = 2): Promise<Frame> {
     const endpoint = await this.supervisor.ensure()
     return await fetchJson<Frame>(this.ops, `${endpoint.url}/frame`, endpoint.token, {
       method: 'POST',
-      body: { cols, rows },
+      body: { cols, rows, detail },
     })
+  }
+
+  async stopFrame(): Promise<void> {
+    // Never start a bridge just to undo a mode it did not enter.
+    if (this.supervisor.phase !== 'ready') return
+    const endpoint = await this.supervisor.ensure()
+    await fetchJson(this.ops, `${endpoint.url}/frame/stop`, endpoint.token, { method: 'POST', body: {} })
   }
 
   async navigate(url: string): Promise<ActResult> {

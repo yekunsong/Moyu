@@ -4,6 +4,14 @@ import { classify, configOf, decide, hostAllowed, newGrant } from '../hub/permis
 
 const config = configOf({ allowedHosts: 'example.com, *.example.org', writePolicy: 'confirm' })
 
+test('hqDetail defaults to 2 and clamps to 1-3', () => {
+  expect(configOf({}).hqDetail).toBe(2)
+  expect(configOf({ hqDetail: 0 }).hqDetail).toBe(1)
+  expect(configOf({ hqDetail: 9 }).hqDetail).toBe(3)
+  expect(configOf({ hqDetail: 2.4 }).hqDetail).toBe(2)
+  expect(configOf({ hqDetail: 'nope' }).hqDetail).toBe(2)
+})
+
 test('local hosts are always allowed', () => {
   expect(hostAllowed(config, 'localhost')).toBe(true)
   expect(hostAllowed(config, '127.0.0.1')).toBe(true)

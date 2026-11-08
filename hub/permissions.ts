@@ -6,6 +6,8 @@ export type Config = {
   allowedHosts: string[]
   writePolicy: WritePolicy
   snapshotMaxChars: number
+  /** HQ capture density, 1 (fast) to 3 (sharp). */
+  hqDetail: number
 }
 
 export const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]', '::1']
@@ -18,10 +20,12 @@ export function configOf(options: Record<string, unknown>): Config {
     .filter(Boolean)
   const policy = options.writePolicy
   const maxChars = Number(options.snapshotMaxChars)
+  const detail = Math.round(Number(options.hqDetail))
   return {
     allowedHosts: [...new Set([...LOCAL_HOSTS, ...hosts])],
     writePolicy: policy === 'once' || policy === 'auto' ? policy : 'confirm',
     snapshotMaxChars: Number.isFinite(maxChars) && maxChars > 500 ? Math.min(maxChars, 60000) : 12000,
+    hqDetail: Number.isFinite(detail) ? Math.min(Math.max(detail, 1), 3) : 2,
   }
 }
 

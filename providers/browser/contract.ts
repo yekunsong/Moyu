@@ -92,6 +92,9 @@ export type Frame = {
   /** The capture's CSS pixel size (the terminal scales it to the cell box). */
   pageWidth: number
   pageHeight: number
+  /** The real PNG pixel size, `detail` times the CSS size in owned mode. */
+  pixelWidth: number
+  pixelHeight: number
 }
 
 export type ActContext = {
@@ -117,5 +120,7 @@ export type Provider = {
   screenshot(cols: number, rows: number): Promise<{ pngBase64: string; cols: number; rows: number }>
   raster(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
   /** A real-pixel PNG on disk, for terminals that can draw a file source. */
-  frame?(cols: number, rows: number): Promise<Frame>
+  frame?(cols: number, rows: number, detail?: number): Promise<Frame>
+  /** Leave image mode: restore the viewport the other tiers expect. */
+  stopFrame?(): Promise<void>
 }

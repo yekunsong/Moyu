@@ -2,7 +2,7 @@
 // confirmation, audit, execution, refresh. Serial by construction.
 import { ask, storeGet, storeSet } from '../engine/adapter'
 import type { Ops } from '../engine/ops'
-import type { Action, ActResult, Snapshot } from '../providers/browser/contract'
+import type { Action, ActResult, Frame, Snapshot } from '../providers/browser/contract'
 import { BrowserProvider } from '../providers/browser/client'
 import { Audit } from './audit'
 import { classify as classificationOf, configOf, decide, describeAction, newGrant, type Config, type SessionGrant } from './permissions'
@@ -304,6 +304,16 @@ export class Hub {
       this.#setView({ status: 'error', error: String((error as Error).message ?? error) })
       return undefined
     }
+  }
+
+  /** Capture an HQ frame at the configured density; the pane maps clicks by CSS size. */
+  async frame(cols: number, rows: number): Promise<Frame> {
+    return await this.provider.frame!(cols, rows, this.config.hqDetail)
+  }
+
+  /** Leaving image mode restores the viewport the text and visual tiers assume. */
+  async stopFrame(): Promise<void> {
+    await this.provider.stopFrame?.()
   }
 
   lastSnapshot(): Snapshot | undefined {

@@ -15,8 +15,8 @@ const PANE = {
 }
 const VIEWPORT = { columns: 100, rows: 24, isFullscreen: true }
 
-function load(on: Parameters<Register>[0]): void {
-  register(on, { allowedHosts: 'localhost', writePolicy: 'confirm' } as Parameters<Register>[1])
+function load(on: Parameters<Register>[0], options: Record<string, unknown> = {}): void {
+  register(on, { allowedHosts: 'localhost', writePolicy: 'confirm', ...options } as Parameters<Register>[1])
 }
 
 async function start($: unknown): Promise<void> {
@@ -33,6 +33,28 @@ async function tool($: unknown, name: string, args: Record<string, unknown> = {}
     ...args,
   })
 }
+
+test('the pane sends the configured hqDetail on /frame', { options: { hqDetail: 3 } }, async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
+  load(on, { hqDetail: 3 })
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+
+  await ui.press({ key: 'hq' })
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'Image key frame').toBeDefined()
+  expect(bottom.frameBodies.length).toBeGreaterThan(0)
+  expect(bottom.frameBodies[0]?.detail).toBe(3)
+  await ui.unmount()
+})
 
 test('closed pane draws the intro and toolbar', async ($, on) => {
   installBottom(on)
@@ -320,9 +342,12 @@ test('hq draws an Image from the frame file on WezTerm', async ($, on) => {
   expect(framesAfter, 'refresh tick captured a frame').toBeGreaterThan(framesBefore)
   expect(await ui.find({ type: 'Image', key: 'frame' }), 'still image mode').toBeDefined()
 
-  // The same button returns to the editable text tier and stops the clock.
+  // The same button returns to the editable text tier, stops the clock and
+  // puts the cell-box viewport back.
   await ui.press({ key: 'hq' })
   expect(await ui.find({ type: 'Image', key: 'frame' })).toBeUndefined()
+  await bottom.advance(1)
+  expect(bottom.fetches.some(one => one.endsWith('/frame/stop')), 'viewport restored').toBe(true)
   await ui.unmount()
 })
 

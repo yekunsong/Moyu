@@ -165,7 +165,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 - 点击一行立即执行（人看得到页面）。模型写操作按 `writePolicy` 确认。
 - 文本框与下拉框可直接在行内编辑：输入后回车，或选择选项，不再弹窗。
 - 行按页面标题分区，底部有固定状态栏；快照超长时用 `↓ next block` 翻页。
-- `visual` 切彩色格档；`hq` 显示真实 PNG 画面（kitty、Ghostty、WezTerm），约 1 秒刷新，点击画面即点击页面；再按一次回文本档。
+- `visual` 切彩色格档；`hq` 显示真实 PNG 画面（kitty、Ghostty、WezTerm），约 1 秒刷新，点击画面即点击页面；再按一次回文本档。hq 以桌面宽度和物理像素密度渲染（见 `hqDetail`），进入时会改变视口，当前快照要到下次刷新才更新。
 - 点击底部键盘条后，按键转发给页面；Esc 交还提示符。
 - 窄于 48 列显示降级提示。
 
@@ -178,6 +178,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
 | `allowedHosts` | `localhost,127.0.0.1` | 逗号分隔的主机；localhost 恒允许。支持 `*.example.org` 通配。`/transom allow` 与 `/transom deny` 的会话授权会覆盖本项。 |
 | `writePolicy` | `confirm` | `confirm`（每次写）、`once`（会话内首次写；提交类动作仍确认）、`auto` |
 | `snapshotMaxChars` | `12000` | 交给模型的快照字符硬上限 |
+| `hqDetail` | `2` | hq 截图像素密度：`1` 快、`2` 默认、`3` 清晰。越高越耗 CPU 与磁盘；截图上限 3840×2560。 |
 
 ## 架构
 
@@ -278,7 +279,7 @@ ref 必须来自应用自身的对象身份，不能是坐标或下标。ref 失
 | 彩色格 | Raster 降采样、24 位色、按行可点 | 中 | 已实现（`visual`） |
 | 图像（HQ） | `Image` + PNG 文件源；kitty、Ghostty、WezTerm | 中 | 已实现（`hq`），约 1 fps |
 
-颜色是真的 24 位前景/背景，不是黑白。但格子终究是“像”不是“是”：小字号会糊，圆角阴影会消失。
+颜色是真的 24 位前景/背景，不是黑白。但格子终究是“像”不是“是”：小字号会糊，圆角阴影会消失。HQ 画面按 1–3 倍密度捕获，每张可达 1–4 MB。
 
 ## 兼容性与限制
 

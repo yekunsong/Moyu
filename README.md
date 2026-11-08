@@ -165,7 +165,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 - Clicking a row executes immediately (a person can see the page). Model writes are confirmed according to `writePolicy`.
 - Text fields and selects are edited inline: type and press Enter, or pick an option; no dialog.
 - Rows are grouped under page headings with a fixed status bar; `↓ next block` scrolls the page when the snapshot is longer than the pane.
-- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm), refreshed about once a second, and clicking the picture clicks the page; both return to text with another press.
+- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm), refreshed about once a second, and clicking the picture clicks the page; both return to text with another press. hq renders at a desktop width and physical pixel density (see `hqDetail`), so entering it changes the viewport and leaves the visible snapshot stale until the next refresh.
 - Click the keyboard strip to forward keys to the page; Esc returns them to the prompt.
 - Panes narrower than 48 columns show a degradation notice.
 
@@ -178,6 +178,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 | `allowedHosts` | `localhost,127.0.0.1` | Comma-separated hosts; localhost is always allowed. Wildcards: `*.example.org`. Session grants from `/transom allow` / `/transom deny` override this for the current session. |
 | `writePolicy` | `confirm` | `confirm` (each write), `once` (first write per session; submits still confirmed), `auto` |
 | `snapshotMaxChars` | `12000` | Hard character cap on a snapshot handed to the model |
+| `hqDetail` | `2` | hq capture density: `1` fast, `2` default, `3` sharp. Higher detail costs CPU and disk; captures are capped at 3840×2560. |
 
 ## Architecture
 
@@ -278,7 +279,7 @@ Measured on Claude Code 2.1.319, local, interactive terminal.
 | Colored cells | Raster downscale, 24-bit color, clickable by row | Medium | Shipped (`visual`) |
 | Images (HQ) | `Image` with a PNG file source; kitty, Ghostty, WezTerm | Medium | Shipped (`hq`), ~1 fps |
 
-The color is real 24-bit foreground/background, not monochrome. Cells are still an image, not the thing itself: small type blurs and rounded shadows disappear.
+The color is real 24-bit foreground/background, not monochrome. Cells are still an image, not the thing itself: small type blurs and rounded shadows disappear. HQ frames are captured at 1–3× density and can be 1–4 MB each.
 
 ## Compatibility and limitations
 

@@ -26,6 +26,11 @@ const VIEW_COLS = 110
 const VIEW_ROWS = 34
 const CELL_W = 8
 const CELL_H = 16
+// HQ captures render at a desktop width and physical density. The pane scales
+// the result once; clicks still map through the CSS size, never the pixels.
+const HQ_MIN_WIDTH = 1100
+const HQ_MAX_WIDTH = 3840
+const HQ_MAX_HEIGHT = 2560
 
 let chrome
 let cdp
@@ -685,47 +690,78 @@ async function shot(request) {
   }
 }
 
-// A frame for the pane's image tier: the same device metrics as /shot, but
-// written to a private PNG file and addressed by path, so the terminal reads
-// exactly this capture.
+function detailOf(value) {
+  const detail = Math.round(Number(value ?? 2))
+  if (!Number.isFinite(detail)) return 2
+  return Math.min(3, Math.max(1, detail))
+}
+
+// A frame for the pane's image tier: written to a private PNG file and
+// addressed by path, so the terminal reads exactly this capture. The CSS
+// viewport keeps the cell box's aspect ratio, floored at a desktop width, and
+// `deviceScaleFactor` multiplies the capture to the pane's physical density.
 async function frame(request) {
   const columns = Math.max(20, Math.min(Number(request.cols) || VIEW_COLS, 200))
   const rows = Math.max(5, Math.min(Number(request.rows) || VIEW_ROWS, 120))
-  let pageWidth = Math.min(columns * CELL_W, 2000)
-  let pageHeight = Math.min(rows * CELL_H, 1200)
+  let detail = detailOf(request.detail)
+  let pageWidth = Math.max(columns * CELL_W, HQ_MIN_WIDTH)
+  let pageHeight = Math.round((pageWidth * rows * CELL_H) / (columns * CELL_W))
+  // Fit inside the pixel budget by dropping detail first; only then shrink the
+  // width, deriving the height so the aspect ratio never changes.
+  while (detail > 1 && (pageWidth * detail > HQ_MAX_WIDTH || pageHeight * detail > HQ_MAX_HEIGHT)) {
+    detail -= 1
+  }
+  if (pageWidth * detail > HQ_MAX_WIDTH || pageHeight * detail > HQ_MAX_HEIGHT) {
+    const scale = Math.min(HQ_MAX_WIDTH / (pageWidth * detail), HQ_MAX_HEIGHT / (pageHeight * detail))
+    pageWidth = Math.max(columns * CELL_W, Math.floor(pageWidth * scale))
+    pageHeight = Math.round((pageWidth * rows * CELL_H) / (columns * CELL_W))
+  }
   if (owned) {
     await cmd('Emulation.setDeviceMetricsOverride', {
       width: pageWidth,
       height: pageHeight,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: detail,
       mobile: false,
     })
   }
-  try {
-    const captured = await capturePng()
-    if (!owned) {
-      // Attached: the capture is the person's real viewport, so the pane's
-      // click mapping must use that size rather than the requested cell box.
-      const size = await pageSize()
-      pageWidth = size.width
-      pageHeight = size.height
-    }
-    frameGeneration += 1
-    const file = join(frameDir, `f${frameGeneration}.png`)
-    writeFileSync(file, Buffer.from(captured.data, 'base64'))
-    frameFiles.push(file)
-    while (frameFiles.length > FRAME_LIMIT) {
-      const old = frameFiles.shift()
-      try {
-        unlinkSync(old)
-      } catch {
-        /* already gone */
-      }
-    }
-    return { file, generation: frameGeneration, columns, rows, pageWidth, pageHeight }
-  } finally {
-    if (owned) await restoreMetrics()
+  const captured = await capturePng()
+  if (!owned) {
+    // Attached: the capture is the person's real viewport at its natural
+    // density, so the pane's click mapping must use that CSS size rather than
+    // the requested cell box.
+    const size = await pageSize()
+    pageWidth = size.width
+    pageHeight = size.height
   }
+  const bytes = Buffer.from(captured.data, 'base64')
+  // The PNG header carries the true capture size; report it rather than
+  // trusting the requested metrics.
+  const pixelWidth = bytes.readUInt32BE(16)
+  const pixelHeight = bytes.readUInt32BE(20)
+  frameGeneration += 1
+  const file = join(frameDir, `f${frameGeneration}.png`)
+  writeFileSync(file, bytes)
+  frameFiles.push(file)
+  while (frameFiles.length > FRAME_LIMIT) {
+    const old = frameFiles.shift()
+    try {
+      unlinkSync(old)
+    } catch {
+      /* already gone */
+    }
+  }
+  // The desktop viewport and its density deliberately stay in place: the pane
+  // maps clicks through pageWidth/pageHeight, so reverting here would move the
+  // page out from under the next click. /frame/stop restores them when the
+  // pane leaves image mode.
+  return { file, generation: frameGeneration, columns, rows, pageWidth, pageHeight, pixelWidth, pixelHeight }
+}
+
+// Leaving image mode returns the owned page to the cell-box viewport the other
+// tiers assume; attach mode never changed it.
+async function stopFrame() {
+  if (owned) await restoreMetrics()
+  return { ok: true }
 }
 
 function send(res, status, body) {
@@ -762,6 +798,7 @@ const ROUTES = {
   'POST /shot': async body => await shot(body),
   'POST /raster': async body => await raster(body),
   'POST /frame': async body => await frame(body),
+  'POST /frame/stop': async () => await stopFrame(),
   'POST /stop': async () => {
     void shutdown(0)
     return { ok: true }
