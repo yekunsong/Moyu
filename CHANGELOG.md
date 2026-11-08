@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- HQ frames render at a desktop width (1100 px floor, aspect borrowed from the cell box) at 1–3× physical density (`hqDetail`, default 2); leaving image mode restores the cell-box viewport via `POST /frame/stop`.
+- HQ streams through Chrome's screencast: the pane polls for newer generations every 250 ms while focused and once a second otherwise, takes one sharp still after about two seconds of quiet, and falls back to one-second stills when the target refuses to stream.
+
 ### Fixed
 
 - Re-install the page agent after a document load, so a reload, back/forward or page-driven navigation no longer turns the next snapshot or ref action into a `TypeError`. Covered by a bridge regression test.

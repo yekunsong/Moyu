@@ -20,10 +20,11 @@ let lastShot: { key: string; cells: string; columns: number; rows: number; url: 
   url: '',
 }
 
-// The HQ image tier: a file path the terminal reads itself, refreshed about
-// once a second while the pane is in image mode. Like lastShot, it lives in a
-// module variable rather than state: a reload drops it and the pane falls back
-// to text.
+// The HQ image tier: a file path the terminal reads itself. Chrome streams
+// frames into one rolling file and the pane polls for a newer generation every
+// 250 ms while focused (1 s otherwise); a still page gets one sharp capture.
+// Like lastShot, it lives in a module variable rather than state: a reload
+// drops it and the pane falls back to text.
 let lastFrame: {
   file: string
   generation: number
@@ -49,6 +50,17 @@ let frameFailures = 0
 /** Whether a frame capture left the page on the hq viewport. */
 let frameMetricsHeld = false
 let frameSize = { columns: 0, rows: 0 }
+// Streaming state: the poll runs on a 250 ms tick and only fires every tick
+// while the pane is focused; unfocused panes and non-streaming providers keep
+// the 1 s cadence. A stale stream gets one sharp still, re-armed only after a
+// newer streamed frame arrives.
+let frameFocused = false
+let frameStreaming = false
+let frameTicks = 0
+let frameSharpTimer: Timer | undefined
+let frameSharpTaken = false
+const FRAME_TICK_MS = 250
+const FRAME_SHARP_AFTER_MS = 2000
 
 let hub: Hub | undefined
 let demo: { url: string } | undefined
@@ -391,6 +403,9 @@ export const register: Register = (on, options) => {
     // An explicit raw get lets the host rule see the noun; read() subscribes.
     await $.state.get({ plugin: 'transom', key: 'view' } as const)
     const model = await read($, view)
+    // The stream polls faster while the pane holds the focus; the timer itself
+    // stays on its 250 ms tick and gates the unfocused asks.
+    frameFocused = !!e.props.isFocused
     const shot = lastShot
     const width = Math.max(20, e.props.bodyColumns)
     const rows = e.props.scroll.bodyRows || e.viewport?.rows || 28
@@ -665,6 +680,11 @@ function stopFrames(): void {
   frameActive = false
   frameTimer?.cancel()
   frameTimer = undefined
+  frameSharpTimer?.cancel()
+  frameSharpTimer = undefined
+  frameTicks = 0
+  frameFocused = false
+  frameSharpTaken = false
   frameBusy = false
   // Image mode changes the owned page's viewport; going back to text puts the
   // cell-box metrics back so snapshots match the pane again.
@@ -723,17 +743,12 @@ async function startImage(
     void $.ui.invalidate('ui.render')
     return false
   }
-  lastFrame = {
-    file: frame.file,
-    generation: frame.generation,
-    columns: frame.columns,
-    rows: frame.rows,
-    pageWidth: frame.pageWidth,
-    pageHeight: frame.pageHeight,
-    url: transom.view.url,
-  }
+  applyFrame(frame, transom)
+  frameStreaming = typeof provider.latestFrame === 'function'
   frameActive = true
   frameFailures = 0
+  frameTicks = 0
+  frameSharpTaken = false
   await update($, view, model => ({
     ...model,
     mode: 'image' as const,
@@ -742,11 +757,15 @@ async function startImage(
   void $.ui.invalidate('ui.render')
   // The mode lives in engine state, not in Hub.view; `frameActive` is the
   // module-level truth the clock reads, so it stops on every exit path.
-  frameTimer = ops.every(1000, () => {
+  frameTimer = ops.every(FRAME_TICK_MS, () => {
     if (!frameActive) {
       stopFrames()
       return
     }
+    frameTicks += 1
+    // Streaming while focused asks every tick; unfocused and the still
+    // fallback keep the 1 s cadence.
+    if ((!frameStreaming || !frameFocused) && frameTicks % (1000 / FRAME_TICK_MS) !== 0) return
     void refreshFrame($, ops, transom)
   })
   return true
@@ -759,17 +778,40 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
   frameBusy = true
   frameMetricsHeld = true
   try {
+    if (frameStreaming) {
+      const answer = await transom.latestFrame(lastFrame.generation)
+      if (!frameActive) return
+      // A provider that lost its stream mid-mode falls back to stills.
+      if (!answer) {
+        frameStreaming = false
+        return
+      }
+      // The live payload also carries `same: false`, so the flag's value (not
+      // its presence) tells the two apart.
+      if ((answer as { same?: boolean }).same === true) {
+        // A target that refused the screencast says so here; the pane then
+        // returns to the one-second still path instead of waiting forever.
+        if ((answer as { streaming?: boolean }).streaming === false) {
+          frameStreaming = false
+          frameFailures = 0
+          return
+        }
+        frameFailures = 0
+        armSharpStill($, ops, transom)
+        return
+      }
+      const frame = answer as Frame
+      frameFailures = 0
+      frameSharpTimer?.cancel()
+      frameSharpTimer = undefined
+      frameSharpTaken = false
+      applyFrame(frame, transom)
+      void $.ui.invalidate('ui.render')
+      return
+    }
     const frame = await transom.frame(frameSize.columns, frameSize.rows)
     frameFailures = 0
-    lastFrame = {
-      file: frame.file,
-      generation: frame.generation,
-      columns: frame.columns,
-      rows: frame.rows,
-      pageWidth: frame.pageWidth,
-      pageHeight: frame.pageHeight,
-      url: transom.view.url,
-    }
+    applyFrame(frame, transom)
     void $.ui.invalidate('ui.render')
   } catch (error) {
     // An occluded window or a busy page can drop one frame; only give up on
@@ -784,6 +826,46 @@ async function refreshFrame($: EngineInterface, ops: Ops, transom: Hub): Promise
     ops.toast(`hq: ${String((error as Error).message ?? error)}`)
     await update($, view, model => ({ ...model, mode: 'text' as const }))
     void $.ui.invalidate('ui.render')
+  } finally {
+    frameBusy = false
+  }
+}
+
+function applyFrame(frame: Frame, transom: Hub): void {
+  lastFrame = {
+    file: frame.file,
+    generation: frame.generation,
+    columns: frame.columns,
+    rows: frame.rows,
+    pageWidth: frame.pageWidth,
+    pageHeight: frame.pageHeight,
+    url: transom.view.url,
+  }
+}
+
+// One sharp still after the stream has been quiet for ~2 s: a static page is
+// then readable at the configured density. Motion cancels the pending still and
+// re-arms the one-shot; a new frame arriving does the same.
+function armSharpStill($: EngineInterface, ops: Ops, transom: Hub): void {
+  if (frameSharpTaken || frameSharpTimer) return
+  frameSharpTimer = ops.after(FRAME_SHARP_AFTER_MS, () => {
+    frameSharpTimer = undefined
+    void takeSharpStill($, transom)
+  })
+}
+
+async function takeSharpStill($: EngineInterface, transom: Hub): Promise<void> {
+  if (!frameActive || frameBusy) return
+  frameBusy = true
+  frameMetricsHeld = true
+  try {
+    const frame = await transom.frame(frameSize.columns, frameSize.rows)
+    frameSharpTaken = true
+    frameFailures = 0
+    applyFrame(frame, transom)
+    void $.ui.invalidate('ui.render')
+  } catch {
+    // The stream is still alive; the next quiet poll re-arms the still.
   } finally {
     frameBusy = false
   }

@@ -56,6 +56,17 @@ let frameDir
 let frameGeneration = 0
 const frameFiles = []
 const FRAME_LIMIT = 10
+// Chrome's screencast pushes frames; the newest overwrites one rolling file so
+// a streamed refresh cannot fill the temp dir. `liveFrame` is the pane-facing
+// answer for GET /frame?since; `frameBox` carries the cell box of the still
+// that started the stream.
+let liveFrame = null
+let screencastOn = false
+let screencastStarting = false
+// A target that refused the screencast once is not asked again until the pane
+// leaves image mode; the pane then falls back to one second stills.
+let screencastRefused = false
+let frameBox = { columns: VIEW_COLS, rows: VIEW_ROWS, pageWidth: 0, pageHeight: 0 }
 // The most recent JavaScript dialog. The default policy is to accept alerts and
 // dismiss confirm/prompt immediately, so a dialog never blocks the page.
 let lastDialog = null
@@ -172,6 +183,7 @@ async function launch() {
     }
   })
   cdp.on('Page.javascriptDialogOpening', handleDialog)
+  cdp.on('Page.screencastFrame', handleScreencastFrame)
   await evalInPage(INSTALL)
 }
 
@@ -219,6 +231,7 @@ async function launchAttached(port) {
     }
   })
   cdp.on('Page.javascriptDialogOpening', handleDialog)
+  cdp.on('Page.screencastFrame', handleScreencastFrame)
   await evalInPage(INSTALL)
   currentUrl = page?.url ?? 'about:blank'
   currentTitle = page?.title ?? ''
@@ -696,6 +709,100 @@ function detailOf(value) {
   return Math.min(3, Math.max(1, detail))
 }
 
+function positivePixels(value) {
+  const pixels = Math.round(Number(value))
+  return Number.isFinite(pixels) && pixels > 0 ? pixels : undefined
+}
+
+// Chrome stops the stream unless every frame is acknowledged, including frames
+// that arrive after the pane left image mode. The newest frame overwrites the
+// one rolling file; nothing accumulates on disk.
+function handleScreencastFrame(params, sid) {
+  if (sid !== undefined && sid !== sessionId) return
+  const ack = params?.sessionId
+  if (ack !== undefined) {
+    cmd('Page.screencastFrameAck', { sessionId: ack }).catch(() => {})
+  }
+  if (!screencastOn || !frameDir || !params?.data) return
+  const bytes = Buffer.from(params.data, 'base64')
+  if (bytes.length < 24 || bytes.readUInt32BE(0) !== 0x89504e47) return
+  const file = join(frameDir, 'live.png')
+  try {
+    writeFileSync(file, bytes)
+  } catch {
+    return
+  }
+  const metadata = params.metadata ?? {}
+  frameGeneration += 1
+  liveFrame = {
+    file,
+    generation: frameGeneration,
+    columns: frameBox.columns,
+    rows: frameBox.rows,
+    // The metadata's device size is the CSS viewport; the PNG header carries
+    // the (possibly downscaled) physical pixels. Clicks map through the CSS
+    // size, exactly as they do for a still.
+    pageWidth: positivePixels(metadata.deviceWidth) ?? frameBox.pageWidth,
+    pageHeight: positivePixels(metadata.deviceHeight) ?? frameBox.pageHeight,
+    pixelWidth: bytes.readUInt32BE(16),
+    pixelHeight: bytes.readUInt32BE(20),
+  }
+}
+
+// Started by the first POST /frame: the still is the reliable first frame, and
+// the stream takes over from there. A target that refuses the screencast leaves
+// the still path untouched and makes GET /frame answer `same`.
+async function startScreencast(maxWidth, maxHeight) {
+  if (screencastOn || screencastStarting || screencastRefused) return
+  screencastStarting = true
+  try {
+    await cmd(
+      'Page.startScreencast',
+      {
+        format: 'png',
+        maxWidth: Math.max(1, positivePixels(maxWidth) ?? 1),
+        maxHeight: Math.max(1, positivePixels(maxHeight) ?? 1),
+        everyNthFrame: 2,
+      },
+      4000,
+    )
+    screencastOn = true
+    screencastRefused = false
+  } catch {
+    screencastOn = false
+    screencastRefused = true
+  } finally {
+    screencastStarting = false
+  }
+}
+
+async function stopScreencast() {
+  const wasOn = screencastOn || screencastStarting
+  screencastOn = false
+  screencastStarting = false
+  screencastRefused = false
+  liveFrame = null
+  if (frameDir) {
+    try {
+      unlinkSync(join(frameDir, 'live.png'))
+    } catch {
+      /* never written */
+    }
+  }
+  if (wasOn && cdp && !cdp.isClosed) await cmd('Page.stopScreencast', {}, 1000).catch(() => {})
+}
+
+// No long-polling: answer with the newest streamed frame when it is newer than
+// `since`, otherwise say nothing changed.
+function liveFrameAnswer(url) {
+  const raw = Number(url?.searchParams?.get('since'))
+  const since = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+  if (liveFrame && liveFrame.generation > since) return { ...liveFrame, same: false }
+  // `streaming` lets the pane tell "nothing new yet" apart from "this target
+  // cannot stream", and use the one-second still path in the latter case.
+  return { same: true, generation: frameGeneration, streaming: screencastOn }
+}
+
 // A frame for the pane's image tier: written to a private PNG file and
 // addressed by path, so the terminal reads exactly this capture. The CSS
 // viewport keeps the cell box's aspect ratio, floored at a desktop width, and
@@ -754,12 +861,18 @@ async function frame(request) {
   // maps clicks through pageWidth/pageHeight, so reverting here would move the
   // page out from under the next click. /frame/stop restores them when the
   // pane leaves image mode.
+  frameBox = { columns, rows, pageWidth, pageHeight }
+  const maxWidth = owned ? pageWidth * detail : pixelWidth
+  const maxHeight = owned ? pageHeight * detail : pixelHeight
+  await startScreencast(maxWidth, maxHeight)
   return { file, generation: frameGeneration, columns, rows, pageWidth, pageHeight, pixelWidth, pixelHeight }
 }
 
-// Leaving image mode returns the owned page to the cell-box viewport the other
-// tiers assume; attach mode never changed it.
+// Leaving image mode stops the stream, drops the rolling frame and returns the
+// owned page to the cell-box viewport the other tiers assume; attach mode never
+// changed the viewport.
 async function stopFrame() {
+  await stopScreencast()
   if (owned) await restoreMetrics()
   return { ok: true }
 }
@@ -798,6 +911,7 @@ const ROUTES = {
   'POST /shot': async body => await shot(body),
   'POST /raster': async body => await raster(body),
   'POST /frame': async body => await frame(body),
+  'GET /frame': async (_body, url) => liveFrameAnswer(url),
   'POST /frame/stop': async () => await stopFrame(),
   'POST /stop': async () => {
     void shutdown(0)
@@ -824,7 +938,8 @@ const server = createServer(async (req, res) => {
     send(res, 401, { ok: false, error: 'unauthorized' })
     return
   }
-  const key = `${req.method} ${new URL(req.url, 'http://x').pathname}`
+  const parsed = new URL(req.url, 'http://x')
+  const key = `${req.method} ${parsed.pathname}`
   const route = ROUTES[key]
   if (!route) {
     send(res, 404, { ok: false, error: `no route ${key}` })
@@ -833,7 +948,7 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === 'POST' || key !== 'GET /health') lastActivity = Date.now()
     const body = req.method === 'POST' ? await readBody(req) : {}
-    const result = await route(body)
+    const result = await route(body, parsed)
     send(res, 200, result)
   } catch (error) {
     const message = String(error?.message ?? error).slice(0, 1200)
@@ -885,6 +1000,9 @@ async function stopOwnedChrome() {
 async function shutdown(code) {
   if (stopping) return
   stopping = true
+  // The stream ends before its frames disappear; a SIGTERM right after /stop
+  // must not leave a temp dir or a screencast session behind.
+  await stopScreencast()
   // Frames are ours alone: drop them now, so a SIGTERM right after /stop
   // cannot leave a temp dir behind. The Chrome profile waits for the child.
   if (frameDir) {

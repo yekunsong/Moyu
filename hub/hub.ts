@@ -311,6 +311,16 @@ export class Hub {
     return await this.provider.frame!(cols, rows, this.config.hqDetail)
   }
 
+  /**
+   * The newest streamed frame newer than `since`. No config: the stream keeps
+   * the detail and metrics the last frame() established. Undefined when the
+   * provider does not stream, so the pane can fall back to frame().
+   */
+  async latestFrame(since: number): Promise<Frame | { same: true; generation: number } | undefined> {
+    if (!this.provider.latestFrame) return undefined
+    return await this.provider.latestFrame(since)
+  }
+
   /** Leaving image mode restores the viewport the text and visual tiers assume. */
   async stopFrame(): Promise<void> {
     await this.provider.stopFrame?.()

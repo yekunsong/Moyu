@@ -27,10 +27,18 @@ export type Bottom = {
   fetches: string[]
   /** Decoded bodies of every /frame call, for detail plumbing assertions. */
   frameBodies: Array<Record<string, unknown>>
+  /** Every GET /frame?since poll, in order. */
+  framePolls: Array<{ since: number; same: boolean }>
   spawns: number
   failHealth: boolean
   /** Directory of /frame calls to fail with a 500, decremented per call. */
   frameFailures: number
+  /** Directory of GET /frame?since polls to fail with a 500. */
+  framePollFailures: number
+  /** Bump the streamed generation, as a screencast frame would. */
+  pushFrame: () => number
+  /** Whether GET /frame?since reports a working stream. */
+  streaming: boolean
   answerAsk: (answer: string | undefined) => void
   advance: (ms: number) => Promise<void>
   readState: (key: string) => unknown
@@ -59,13 +67,27 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
   const asks: string[] = []
   const fetches: string[] = []
   const frameBodies: Array<Record<string, unknown>> = []
+  const framePolls: Array<{ since: number; same: boolean }> = []
   let askAnswer: string | undefined = 'Allow'
   let spawns = 0
   const clock = mock.clock(on)
-  const bottomRef: { failHealth: boolean; frameFailures: number } = { failHealth: false, frameFailures: 0 }
+  const bottomRef: {
+    failHealth: boolean
+    frameFailures: number
+    framePollFailures: number
+    streaming: boolean
+  } = {
+    failHealth: false,
+    frameFailures: 0,
+    framePollFailures: 0,
+    streaming: true,
+  }
   mock.store(on)
   mock.env(on, options.env ?? {})
+  // One generation counter shared by stills and the streamed frame, as the
+  // real bridge shares it: a newer number means a newer picture.
   let frameGeneration = 0
+  let frameBox = { columns: 20, rows: 5 }
   const states = new Map<string, { value: unknown; version: number }>()
 
   const value = <T,>(v: T) => ({ value: v }) as never
@@ -105,7 +127,9 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
   on('http.fetch', (async (_$: unknown, e: { url: string; init?: { method?: string; body?: string } }) => {
     const init = e.init ?? {}
     fetches.push(`${init.method ?? 'GET'} ${e.url}`)
-    const path = new URL(e.url).pathname
+    const url = new URL(e.url)
+    const path = url.pathname
+    const method = init.method ?? 'GET'
     const body = init.body ? JSON.parse(init.body) : {}
     if (path === '/health') {
       const ok = !bottomRef?.failHealth
@@ -128,6 +152,40 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     if (path === '/frame/stop') {
       return value({ status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true }) })
     }
+    if (path === '/frame' && method === 'GET') {
+      const since = Math.max(0, Math.floor(Number(url.searchParams.get('since')) || 0))
+      if (bottomRef.framePollFailures > 0) {
+        bottomRef.framePollFailures -= 1
+        framePolls.push({ since, same: false })
+        return value({ status: 500, ok: false, headers: {}, text: JSON.stringify({ ok: false, error: 'capture timed out' }) })
+      }
+      const same = frameGeneration <= since
+      framePolls.push({ since, same })
+      if (same) {
+        return value({
+          status: 200,
+          ok: true,
+          headers: {},
+          text: JSON.stringify({ same: true, generation: frameGeneration, streaming: bottomRef.streaming }),
+        })
+      }
+      return value({
+        status: 200,
+        ok: true,
+        headers: {},
+        text: JSON.stringify({
+          file: '/tmp/transom-test-live.png',
+          generation: frameGeneration,
+          columns: frameBox.columns,
+          rows: frameBox.rows,
+          pageWidth: frameBox.columns * 8,
+          pageHeight: frameBox.rows * 16,
+          pixelWidth: frameBox.columns * 8,
+          pixelHeight: frameBox.rows * 16,
+          same: false,
+        }),
+      })
+    }
     if (path === '/frame' && bottomRef.frameFailures > 0) {
       bottomRef.frameFailures -= 1
       return value({ status: 500, ok: false, headers: {}, text: JSON.stringify({ ok: false, error: 'capture timed out' }) })
@@ -139,6 +197,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
       const rows = Math.max(5, Math.min(Number(body.rows) || 5, 120))
       const detail = Math.max(1, Math.min(Math.round(Number(body.detail) || 2), 3))
       frameBodies.push({ ...body, detail })
+      frameBox = { columns, rows }
       frameGeneration += 1
       return value({
         status: 200,
@@ -255,6 +314,7 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     asks,
     fetches,
     frameBodies,
+    framePolls,
     get spawns() {
       return spawns
     },
@@ -269,6 +329,22 @@ export function installBottom(on: On, options: BottomOptions = {}): Bottom {
     },
     set frameFailures(next: number) {
       bottomRef.frameFailures = next
+    },
+    get framePollFailures() {
+      return bottomRef.framePollFailures
+    },
+    set framePollFailures(next: number) {
+      bottomRef.framePollFailures = next
+    },
+    pushFrame: () => {
+      frameGeneration += 1
+      return frameGeneration
+    },
+    get streaming() {
+      return bottomRef.streaming
+    },
+    set streaming(next: boolean) {
+      bottomRef.streaming = next
     },
     answerAsk: answer => {
       askAnswer = answer

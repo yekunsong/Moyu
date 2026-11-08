@@ -8,6 +8,7 @@ import type {
   ActResult,
   Capabilities,
   Frame,
+  FramePoll,
   Provider,
   ProviderMeta,
   Snapshot,
@@ -110,6 +111,12 @@ export class BrowserProvider implements Provider {
       method: 'POST',
       body: { cols, rows, detail },
     })
+  }
+
+  async latestFrame(since: number): Promise<FramePoll> {
+    const endpoint = await this.supervisor.ensure()
+    const at = Math.max(0, Math.floor(Number(since) || 0))
+    return await fetchJson<FramePoll>(this.ops, `${endpoint.url}/frame?since=${at}`, endpoint.token)
   }
 
   async stopFrame(): Promise<void> {

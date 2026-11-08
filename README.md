@@ -165,7 +165,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 - Clicking a row executes immediately (a person can see the page). Model writes are confirmed according to `writePolicy`.
 - Text fields and selects are edited inline: type and press Enter, or pick an option; no dialog.
 - Rows are grouped under page headings with a fixed status bar; `↓ next block` scrolls the page when the snapshot is longer than the pane.
-- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm), refreshed about once a second, and clicking the picture clicks the page; both return to text with another press. hq renders at a desktop width and physical pixel density (see `hqDetail`), so entering it changes the viewport and leaves the visible snapshot stale until the next refresh.
+- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame (kitty, Ghostty, WezTerm) streamed from Chrome and polled every 250 ms while the pane has focus (1 s otherwise), and clicking the picture clicks the page; both return to text with another press. When the stream has been still for ~2 seconds the pane takes one sharp still at `hqDetail`, and motion resumes the cheap stream. hq renders at a desktop width and physical pixel density (see `hqDetail`), so entering it changes the viewport and leaves the visible snapshot stale until the next refresh.
 - Click the keyboard strip to forward keys to the page; Esc returns them to the prompt.
 - Panes narrower than 48 columns show a degradation notice.
 
@@ -178,7 +178,7 @@ Snapshots return the visible region by default; `scope: "document"` asks for the
 | `allowedHosts` | `localhost,127.0.0.1` | Comma-separated hosts; localhost is always allowed. Wildcards: `*.example.org`. Session grants from `/transom allow` / `/transom deny` override this for the current session. |
 | `writePolicy` | `confirm` | `confirm` (each write), `once` (first write per session; submits still confirmed), `auto` |
 | `snapshotMaxChars` | `12000` | Hard character cap on a snapshot handed to the model |
-| `hqDetail` | `2` | hq capture density: `1` fast, `2` default, `3` sharp. Higher detail costs CPU and disk; captures are capped at 3840×2560. |
+| `hqDetail` | `2` | hq still density: `1` fast, `2` default, `3` sharp. The stream uses the density of the frame that opened image mode; the sharp still taken on a quiet page uses this value. Higher detail costs CPU and disk; captures are capped at 3840×2560. |
 
 ## Architecture
 
@@ -277,7 +277,7 @@ Measured on Claude Code 2.1.319, local, interactive terminal.
 |---|---|---|---|
 | Text | Text, links, form structure, colored | Low | Shipped |
 | Colored cells | Raster downscale, 24-bit color, clickable by row | Medium | Shipped (`visual`) |
-| Images (HQ) | `Image` with a PNG file source; kitty, Ghostty, WezTerm | Medium | Shipped (`hq`), ~1 fps |
+| Images (HQ) | `Image` with a PNG file source; kitty, Ghostty, WezTerm | Medium | Shipped (`hq`), streamed |
 
 The color is real 24-bit foreground/background, not monochrome. Cells are still an image, not the thing itself: small type blurs and rounded shadows disappear. HQ frames are captured at 1–3× density and can be 1–4 MB each.
 
@@ -288,7 +288,7 @@ The color is real 24-bit foreground/background, not monochrome. Cells are still 
 - **Interactive only:** desktop app, mobile and headless sessions do not draw the pane.
 - **Headless Chrome only:** no logged-in profile by default; no extensions, no audio, no tabs.
 - **No JS-rendered canvas semantics:** canvas content participates as an image, not as nodes.
-- **Raster is manual:** `visual` repaints on demand; `hq` refreshes at ~1 fps. No dirty-rectangle streaming yet.
+- **Raster is manual:** `visual` repaints on demand; `hq` streams via Chrome's screencast (250 ms poll while focused, 1 s otherwise) and takes one sharp still when the page is idle.
 - **HQ terminals:** `hq` needs a terminal that reads a PNG path itself (kitty, Ghostty, WezTerm); iTerm2, tmux and Windows Terminal stay on the text tier.
 - **Dialogs:** `alert` is accepted, `confirm`/`prompt` are dismissed so a page never blocks; the dialog is recorded in `/health` and the action message.
 

@@ -335,11 +335,11 @@ test('hq draws an Image from the frame file on WezTerm', async ($, on) => {
   expect(image?.props.alt ?? '').toContain('screenshot')
   expect(await ui.find({ type: 'Text', text: /read-only/ }), 'read-only hint').toBeDefined()
 
-  // The 1 fps clock keeps fetching while image mode is active.
-  const framesBefore = bottom.fetches.filter(one => one.endsWith('/frame')).length
-  await bottom.advance(1100)
-  const framesAfter = bottom.fetches.filter(one => one.endsWith('/frame')).length
-  expect(framesAfter, 'refresh tick captured a frame').toBeGreaterThan(framesBefore)
+  // The stream is polled; this pane is not focused, so once a second.
+  const pollsBefore = bottom.framePolls.length
+  bottom.pushFrame()
+  await bottom.advance(1000)
+  expect(bottom.framePolls.length, 'stream polled').toBeGreaterThan(pollsBefore)
   expect(await ui.find({ type: 'Image', key: 'frame' }), 'still image mode').toBeDefined()
 
   // The same button returns to the editable text tier, stops the clock and
@@ -368,17 +368,136 @@ test('hq rides out a dropped frame and gives up only after repeats', async ($, o
   expect(await ui.find({ type: 'Image', key: 'frame' }), 'image mode').toBeDefined()
 
   // A covered window drops frames; two in a row must not end the mode.
-  bottom.frameFailures = 2
-  await bottom.advance(1100)
-  await bottom.advance(1100)
+  bottom.framePollFailures = 2
+  await bottom.advance(1000)
+  await bottom.advance(1000)
   expect(await ui.find({ type: 'Image', key: 'frame' }), 'survived two drops').toBeDefined()
 
   // The registry fails until a third consecutive frame: then the mode stops.
-  bottom.frameFailures = 5
-  await bottom.advance(1100)
-  await bottom.advance(1100)
-  await bottom.advance(1100)
+  bottom.framePollFailures = 5
+  await bottom.advance(1000)
+  await bottom.advance(1000)
+  await bottom.advance(1000)
   expect(await ui.find({ type: 'Image', key: 'frame' }), 'gave up on the mode').toBeUndefined()
+  await ui.unmount()
+})
+
+test('focused image mode polls the stream every 250 ms and ignores a same answer', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: { ...PANE, isFocused: true },
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'hq' })
+  const image = await ui.find({ type: 'Image', key: 'frame' })
+  expect(image, 'image mode').toBeDefined()
+  const generation = (image?.props.source as { generation: number }).generation
+  const polls = bottom.framePolls.length
+  const posts = bottom.frameBodies.length
+
+  // One tick is one poll while focused; a `same` answer redraws nothing.
+  await bottom.advance(250)
+  expect(bottom.framePolls.length, 'one poll per 250 ms').toBe(polls + 1)
+  expect(bottom.framePolls.at(-1)?.same, 'nothing streamed yet').toBe(true)
+  const unchanged = await ui.find({ type: 'Image', key: 'frame' })
+  expect((unchanged?.props.source as { generation: number }).generation).toBe(generation)
+  expect(bottom.frameBodies.length, 'same does not take a still').toBe(posts)
+
+  // A newer streamed generation replaces the picture.
+  bottom.pushFrame()
+  await bottom.advance(250)
+  const updated = await ui.find({ type: 'Image', key: 'frame' })
+  expect((updated?.props.source as { generation: number }).generation).toBeGreaterThan(generation)
+  await ui.unmount()
+})
+
+test('a quiet stream takes one sharp still after about two seconds', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: { ...PANE, isFocused: true },
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'hq' })
+  const image = await ui.find({ type: 'Image', key: 'frame' })
+  const generation = (image?.props.source as { generation: number }).generation
+  const posts = bottom.frameBodies.length
+
+  // Two seconds of `same` buys exactly one high-detail still.
+  await bottom.advance(2500)
+  expect(bottom.frameBodies.length, 'one sharp still').toBe(posts + 1)
+  expect(bottom.frameBodies.at(-1)?.detail, 'the configured hqDetail').toBe(2)
+  const sharp = await ui.find({ type: 'Image', key: 'frame' })
+  expect((sharp?.props.source as { generation: number }).generation).toBe(generation + 1)
+
+  // Staying idle does not keep re-capturing.
+  await bottom.advance(2500)
+  expect(bottom.frameBodies.length, 'no second still while idle').toBe(posts + 1)
+  await ui.unmount()
+})
+
+test('leaving image mode cancels the stream poll', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: { ...PANE, isFocused: true },
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'hq' })
+  await bottom.advance(250)
+  const polls = bottom.framePolls.length
+  expect(polls).toBeGreaterThan(0)
+
+  await ui.press({ key: 'hq' })
+  await bottom.advance(2000)
+  expect(bottom.framePolls.length, 'no polls after leaving').toBe(polls)
+  expect(bottom.fetches.some(one => one.endsWith('/frame/stop')), 'stream stopped').toBe(true)
+  await ui.unmount()
+})
+
+test('a refused screencast falls back to one-second stills', async ($, on) => {
+  const bottom = installBottom(on, { env: { TERM_PROGRAM: 'WezTerm' } })
+  bottom.streaming = false
+  load(on)
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: { ...PANE, isFocused: true },
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.press({ key: 'hq' })
+  const posted = bottom.frameBodies.length
+
+  // The first poll reports a dead stream; the next one-second tick takes a
+  // fresh still instead of waiting for frames that will never come.
+  await bottom.advance(250)
+  expect(bottom.framePolls.at(-1)?.same).toBe(true)
+  await bottom.advance(750)
+  expect(bottom.frameBodies.length, 'fell back to stills').toBeGreaterThan(posted)
+  expect(await ui.find({ type: 'Image', key: 'frame' }), 'still in image mode').toBeDefined()
   await ui.unmount()
 })
 

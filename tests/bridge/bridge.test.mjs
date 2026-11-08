@@ -299,10 +299,13 @@ test('frame writes a real PNG file and prunes old generations', async () => {
   const second = await json('/frame', { cols: 40, rows: 12 })
   assert.ok(second.body.generation > first.body.generation, 'generation increases')
 
-  // Ten more captures prune the earliest file and keep at most ten.
+  // Ten more captures prune the earliest file and keep at most ten stills;
+  // the screencast's rolling frame is one extra file, never a growing set.
   for (let i = 0; i < 10; i += 1) await json('/frame', { cols: 20, rows: 5 })
-  const files = readdirSync(dirname(first.body.file)).filter(name => name.endsWith('.png'))
-  assert.ok(files.length <= 10, `at most ten frames, saw ${files.length}`)
+  const names = readdirSync(dirname(first.body.file))
+  const stills = names.filter(name => /^f\d+\.png$/.test(name))
+  assert.ok(stills.length <= 10, `at most ten frames, saw ${stills.length}`)
+  assert.ok(names.filter(name => name === 'live.png').length <= 1, 'one rolling streamed frame')
   assert.equal(existsSync(first.body.file), false, 'the oldest frame was pruned')
 })
 
@@ -385,6 +388,74 @@ test('a click mapped through the frame CSS size hits the counter', async () => {
 
   const after = (await json('/snapshot', { maxChars: 50000 })).body
   assert.equal(after.nodes.find(node => node.role === 'status').name, '1')
+})
+
+test('screencast streams newer frames and /frame/stop ends the stream', async () => {
+  await json('/navigate', { url: demo.url })
+  // Detail 1 keeps CSS pixels equal to device pixels, so the streamed CSS
+  // mapping can be compared with the still's exactly.
+  const first = await json('/frame', { cols: 60, rows: 20, detail: 1 })
+  assert.equal(first.status, 200)
+  let latest = first.body.generation
+  const liveFile = join(dirname(first.body.file), 'live.png')
+
+  // Scrolling repaints the demo page, so Chrome pushes a newer frame.
+  let streamed
+  let reads = 0
+  let deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    const answer = await json(`/frame?since=${latest}`)
+    assert.equal(answer.status, 200)
+    reads += 1
+    if (answer.body.same === false) {
+      streamed = answer.body
+      break
+    }
+    assert.equal(answer.body.same, true)
+    await json('/act', { action: { kind: 'scroll', dx: 0, dy: 1 } })
+    await sleep(200)
+  }
+  assert.ok(streamed, 'a newer streamed generation arrived')
+  assert.ok(reads >= 2, 'at least two since reads happened')
+  assert.ok(streamed.generation > latest, 'the streamed generation is newer')
+  assert.equal(streamed.file, liveFile)
+  assert.ok(existsSync(liveFile), 'the rolling file exists')
+  assert.deepEqual(pngSize(liveFile), { width: streamed.pixelWidth, height: streamed.pixelHeight })
+  assert.equal(streamed.columns, first.body.columns)
+  assert.equal(streamed.rows, first.body.rows)
+  assert.equal(streamed.pageWidth, first.body.pageWidth)
+  assert.equal(streamed.pageHeight, first.body.pageHeight)
+  latest = streamed.generation
+
+  // A static page answers `same` instead of re-sending the picture.
+  let same = 0
+  deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    const answer = await json(`/frame?since=${latest}`)
+    if (answer.body.same === true) {
+      same += 1
+      if (same >= 2) break
+    } else {
+      latest = answer.body.generation
+      same = 0
+    }
+    await sleep(200)
+  }
+  assert.ok(same >= 2, 'a static page answers same')
+
+  // /frame/stop ends the stream, drops the rolling file and restores the
+  // cell-box viewport.
+  const stopped = await json('/frame/stop', {})
+  assert.equal(stopped.body.ok, true)
+  assert.equal(existsSync(liveFile), false, 'the rolling frame is cleared')
+  const after = await json(`/frame?since=${latest}`)
+  assert.equal(after.body.same, true)
+  await json('/act', { action: { kind: 'scroll', dx: 0, dy: 2 } })
+  await sleep(700)
+  const quiet = await json(`/frame?since=${latest}`)
+  assert.equal(quiet.body.same, true, 'a stopped stream emits nothing')
+  const snap = (await json('/snapshot', { maxChars: 50000 })).body
+  assert.equal(snap.viewport.width, 110 * 8)
 })
 
 test('a javascript alert is accepted, recorded and does not block the page', async () => {

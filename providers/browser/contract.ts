@@ -97,6 +97,9 @@ export type Frame = {
   pixelHeight: number
 }
 
+/** A streamed frame, or the newest generation when the pane is already current. */
+export type FramePoll = Frame | { same: true; generation: number; streaming?: boolean }
+
 export type ActContext = {
   actor: 'person' | 'model'
   signal?: AbortSignal
@@ -121,6 +124,8 @@ export type Provider = {
   raster(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
   /** A real-pixel PNG on disk, for terminals that can draw a file source. */
   frame?(cols: number, rows: number, detail?: number): Promise<Frame>
+  /** The newest streamed frame, when the provider pushes frames. */
+  latestFrame?(since: number): Promise<FramePoll>
   /** Leave image mode: restore the viewport the other tiers expect. */
   stopFrame?(): Promise<void>
 }
