@@ -308,7 +308,7 @@ npm run test:bridge
 ## Roadmap
 
 - **M0–M5 (done):** probe, provider contract + bridge, shared human/model channel, colored-cell tier, degradation and recovery, docs and packaging.
-- **Next:** dirty-rectangle raster streaming and an image tier; `once`-policy end-to-end test; a second provider (Minecraft or a LINE gateway) to pressure-test the contract.
+- **Next (0.3):** real-pixel capture and screencast streaming, iTerm2/tmux image support, click-driven navigation containment, and a read-only second provider to pressure-test the contract. See [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md).
 - **Later:** third-party provider distribution via the `types` contract; multi-provider focus and resource quotas; mobile surface support.
 
 ## Landscape

@@ -306,7 +306,7 @@ npm run test:bridge
 ## 路线图
 
 - **M0–M5（已完成）：** 探针、provider 合同 + bridge、人机共用通道、彩色格档、降级与恢复、文档与打包。
-- **下一步：** 脏区 Raster 推流与图像档；`once` 策略端到端测试；第二个 provider（Minecraft 或 LINE 网关）压合同。
+- **下一步（0.3）：** 真实像素捕获与 screencast 流式刷新、iTerm2/tmux 图像支持、点击导致的导航约束，以及一个只读的第二 provider 来压测契约。见 [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md)。
 - **更远：** 通过 `types` 合同分发第三方 provider；多 provider 焦点与资源配额；移动表面。
 
 ## 竞品位置
