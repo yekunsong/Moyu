@@ -81,7 +81,7 @@ Transom 把外部应用压成一对接口——`snapshot()` 读结构化状态�
 
 ## 状态
 
-v0.2.0，early access。Claude Code 的 function hooks 接口处于 early access，版本间可能变化。M0–M5 与 0.2 的全部阶段（文本 UI、HQ 图像档、接管模式、Linux、模型易用性、安全打磨）均已完成；设计与偏差见 [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) 与 [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md)。
+0.3 进行中（正式发版前包版本仍为 0.2.0）；early access。Claude Code 的 function hooks 接口处于 early access，版本间可能变化。M0–M5 与 0.2 的全部阶段（文本 UI、HQ 图像档、接管模式、Linux、模型易用性、安全打磨）均已完成。0.3 的各阶段已经实现——真实像素捕获（F1）、screencast 流式刷新（F2）、iTerm2/tmux 内联 PNG（F3）、点击导航约束（S1）、只读 provider（C1），以及文档与门禁（Q1）——iTerm2/tmux 的手工会话仍待验证；设计与偏差见 [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md)、[`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md) 与 [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md)。
 
 ## 依赖
 
@@ -162,6 +162,8 @@ reader 与浏览器共用同一套主机白名单、队列与审计，但从不�
 | `mcp__transom__browser_audit` | 读 | 最近动作及其发起者与结果 |
 
 快照默认返回可见区；`scope: "document"` 请求整页。两者都受 `snapshotMaxChars` 限制。ref 在下一次快照或导航前有效。
+
+工具名里的 `browser_` 前缀为兼容性保留，provider 本身可插拔：同一组工具驱动当前启用的 provider，包括只读的 `reader` provider——它对指针与按键动作会给出明确的拒绝消息。
 
 ## 面板操作
 
@@ -293,7 +295,9 @@ ref 必须来自应用自身的对象身份，不能是坐标或下标。ref 失
 - **仅无头 Chrome：** 默认无登录态、无扩展、无音频、无多标签。
 - **Canvas 无语义：** canvas 内容以图像参与，不是节点。
 - **Raster 为手动刷新：** `visual` 按需重绘；`hq` 通过 Chrome screencast 推流（有焦点时 250 ms 轮询，其余 1 秒），页面静止时补一张清晰静帧。
-- **HQ 终端：** `hq` 需要终端自己读取 PNG 路径（kitty、Ghostty、WezTerm），或接收内联 PNG 字节（iTerm2 3.5+，以及开启 `allow-passthrough` 与 `focus-events` 的 tmux）；内联渲染要求全屏布局，Windows Terminal 留在文本档。
+- **HQ 终端：** `hq` 需要终端自己读取 PNG 路径（kitty、Ghostty、WezTerm），或接收内联 PNG 字节（iTerm2 3.5+，以及开启 `allow-passthrough` 与 `focus-events` 的 tmux）；内联渲染要求全屏布局，tmux 还需开启这两个选项，Windows Terminal 留在文本档。
+- **内联负载上限：** 内联源把解码后的 PNG 控制在 2 MiB 以内。面板先降到 detail 1 重试，仍放不下则留在文本档并给出提示。
+- **逃逸导航只是兜底：** link click 与 clickAt 在运行前预检，但脚本重定向或表单提交（`press Enter`）仍可能落到别的主机。hub 会记为 `escaped` 并显示 **back** / **allow host**；在 `auto` 下这不是预防。
 
 ## 开发
 
@@ -312,8 +316,10 @@ npm run test:bridge
 ## 路线图
 
 - **M0–M5（已完成）：** 探针、provider 合同 + bridge、人机共用通道、彩色格档、降级与恢复、文档与打包。
-- **下一步（0.3）：** 真实像素捕获与 screencast 流式刷新、iTerm2/tmux 图像支持、点击导致的导航约束，以及一个只读的第二 provider 来压测契约。见 [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md)。
-- **更远：** 通过 `types` 合同分发第三方 provider；多 provider 焦点与资源配额；移动表面。
+- **0.2（已完成）：** 文本 UI、HQ 图像档、接管模式、Linux 可移植性、模型易用性、安全打磨。见 [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md)。
+- **0.3（已完成）：** F1 真实像素捕获、F2 screencast 流式刷新、F3 iTerm2 与 tmux 内联 PNG、S1 点击导致的导航约束、C1 只读 `reader` provider、Q1 文档与门禁。iTerm2/tmux 的手工会话仍待验证。见 [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md)。
+- **下一步（0.4）：** 交互式第三方 provider、`target="_blank"` 处理、移动表面，以及内联 provider 的截图。
+- **更远：** 通过 `types` 合同分发第三方 provider；多 provider 焦点与资源配额。
 
 ## 竞品位置
 

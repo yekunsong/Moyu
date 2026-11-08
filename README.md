@@ -81,7 +81,7 @@ Moving the window into the terminal is a side effect. The product is **structure
 
 ## Status
 
-v0.2.0, early access. The Claude Code function-hooks API is early access and may change between releases. Milestones M0–M5 and every 0.2 phase (text UI, HQ image tier, attach mode, Linux, model ergonomics, safety polish) are complete; see [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) and [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md) for the design, deviations and verified findings.
+0.3 in progress (the package still reports 0.2.0 until the release); early access. The Claude Code function-hooks API is early access and may change between releases. Milestones M0–M5 and every 0.2 phase (text UI, HQ image tier, attach mode, Linux, model ergonomics, safety polish) are complete. The 0.3 phases are implemented — real-pixel capture (F1), screencast streaming (F2), inline PNG for iTerm2/tmux (F3), click containment (S1), the read-only provider (C1), and docs plus gates (Q1) — with manual iTerm2/tmux sessions still pending; see [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md), [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md) and [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md) for the design, deviations and verified findings.
 
 ## Requirements
 
@@ -162,6 +162,8 @@ The pane connects to the first tab (preferring an http/https page) and drives it
 | `mcp__transom__browser_audit` | read | Recent actions with actor and outcome |
 
 Snapshots return the visible region by default; `scope: "document"` asks for the whole page. Both are capped by `snapshotMaxChars`. Refs are valid until the next snapshot or navigation.
+
+The `browser_` prefix in the tool names is kept for compatibility even though providers are pluggable: the same tools drive whichever provider is active, including the text-only `reader` provider, which refuses pointer and key actions with a clear message.
 
 ## Pane controls
 
@@ -293,7 +295,9 @@ The color is real 24-bit foreground/background, not monochrome. Cells are still 
 - **Headless Chrome only:** no logged-in profile by default; no extensions, no audio, no tabs.
 - **No JS-rendered canvas semantics:** canvas content participates as an image, not as nodes.
 - **Raster is manual:** `visual` repaints on demand; `hq` streams via Chrome's screencast (250 ms poll while focused, 1 s otherwise) and takes one sharp still when the page is idle.
-- **HQ terminals:** `hq` needs a terminal that reads a PNG path itself (kitty, Ghostty, WezTerm) or takes inline PNG bytes (iTerm2 3.5+, tmux with `allow-passthrough` and `focus-events`). Inline rendering requires the fullscreen layout; Windows Terminal stays on the text tier.
+- **HQ terminals:** `hq` needs a terminal that reads a PNG path itself (kitty, Ghostty, WezTerm) or takes inline PNG bytes (iTerm2 3.5+, tmux with `allow-passthrough` and `focus-events`). Inline rendering requires the fullscreen layout and tmux additionally needs those two options set; Windows Terminal stays on the text tier.
+- **Inline payload cap:** inline sources keep the decoded PNG under 2 MiB. The pane retries at detail 1, and a page that still does not fit stays in text mode with a notice.
+- **Escaped navigation is a backstop:** link clicks and `clickAt` are preflighted before they run, but a script redirect or a form submit (`press Enter`) can still land on another host. The hub audits it as `escaped` and shows **back** / **allow host**; under `auto` this is not prevention.
 - **Dialogs:** `alert` is accepted, `confirm`/`prompt` are dismissed so a page never blocks; the dialog is recorded in `/health` and the action message.
 
 ## Development
@@ -313,8 +317,10 @@ npm run test:bridge
 ## Roadmap
 
 - **M0–M5 (done):** probe, provider contract + bridge, shared human/model channel, colored-cell tier, degradation and recovery, docs and packaging.
-- **Next (0.3):** real-pixel capture and screencast streaming, iTerm2/tmux image support, click-driven navigation containment, and a read-only second provider to pressure-test the contract. See [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md).
-- **Later:** third-party provider distribution via the `types` contract; multi-provider focus and resource quotas; mobile surface support.
+- **0.2 (done):** text UI, HQ image tier, attach mode, Linux portability, model ergonomics, safety polish. See [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md).
+- **0.3 (done):** F1 real-pixel capture, F2 screencast streaming, F3 inline PNG for iTerm2 and tmux, S1 click-driven navigation containment, C1 read-only `reader` provider, Q1 docs and gates. Manual iTerm2/tmux sessions are still pending. See [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md).
+- **Next (0.4):** interactive third-party providers, `target="_blank"` handling, mobile surfaces, and screenshots with inline providers.
+- **Later:** third-party provider distribution via the `types` contract; multi-provider focus and resource quotas.
 
 ## Landscape
 

@@ -43,6 +43,9 @@ type SnapshotNode = {
   depth: number
   value?: string       // passwords masked
   href?: string
+  options?: Array<{ value: string; label: string; selected?: boolean }>
+  invalid?: boolean    // the field failed validation
+  error?: string       // nearby validation text
   interactive?: boolean
   submits?: boolean
   state?: { disabled?; checked?; expanded?; selected?; focused? }
@@ -68,7 +71,7 @@ The hub checks `capabilities` before it prompts or executes and fails closed wit
 - `scroll` gates `scroll`.
 - `navigation` gates `navigate`, `back`, `forward`, `reload`.
 
-Declare only what the adapter really implements. An action outside the set (for example `fill` on a text-only provider) reaches `act()` and should return a clear unsupported message. `wait` has no capability bit and is likewise the adapter's business.
+Declare only what the adapter really implements. An action with no capability bit (for example `wait` on a provider that does not implement it) reaches `act()` and should return a clear unsupported message.
 
 `ActResult` must carry `message`. On success where the application may have changed, set `changed: true` so the hub refreshes. `navigate`, `back` and `forward` should set `url` to where they landed.
 

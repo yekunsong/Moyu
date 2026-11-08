@@ -93,41 +93,41 @@ export async function registerToolSpecs($: EngineInterface): Promise<void> {
     await $.tool.register({
       name: 'browser_open',
       description:
-        'Open the Transom browser pane at a URL. Starts the local headless browser on first use. Prefer this before browser_snapshot.',
+        'Open the Transom pane at a URL. Starts the local provider on first use. Prefer this before browser_snapshot.',
       inputSchema: OPEN_SCHEMA,
       isDeferred: false,
     })
     await $.tool.register({
       name: 'browser_snapshot',
       description:
-        'Return a structured snapshot of the page: URL, title, landmarks and ref-tagged nodes (role, name, value, state). Refs are valid until the next snapshot or navigation. Use viewport scope unless you need the whole page. Pass sinceLast: true to receive only added, removed and changed refs.',
+        'Return a structured snapshot of the open page: URL, title, landmarks and ref-tagged nodes (role, name, value, state). Refs are valid until the next snapshot or navigation. Use viewport scope unless you need the whole page. Pass sinceLast: true to receive only added, removed and changed refs.',
       inputSchema: SNAPSHOT_SCHEMA,
       isDeferred: false,
     })
     await $.tool.register({
       name: 'browser_find',
       description:
-        'Find nodes in the current snapshot without re-reading the page: filter by text (case-insensitive, matches names and values), exact role, and interactiveOnly. Returns snapshot-format lines with refs, capped at 40.',
+        'Find nodes in the current snapshot without re-reading the open page: filter by text (case-insensitive, matches names and values), exact role, and interactiveOnly. Returns snapshot-format lines with refs, capped at 40.',
       inputSchema: FIND_SCHEMA,
       isDeferred: false,
     })
     await $.tool.register({
       name: 'browser_act',
       description:
-        'Perform one action on the page: click, check, uncheck, clickAt, fill, select, press, scroll, hover, focus, navigate, back, forward, reload. check/uncheck drive a checkbox (or check a radio) and no-op when the state already matches. clickAt uses viewport CSS pixels (x, y) instead of a ref. Returns the action result and an audit id. Retake the snapshot after stale-ref errors.',
+        'Perform one action on the open page: click, check, uncheck, clickAt, fill, select, press, scroll, hover, focus, navigate, back, forward, reload. check/uncheck drive a checkbox (or check a radio) and no-op when the state already matches. clickAt uses viewport CSS pixels (x, y) instead of a ref. A text-only provider refuses pointer and key actions with a clear message. Returns the action result and an audit id. Retake the snapshot after stale-ref errors.',
       inputSchema: ACT_SCHEMA,
       isDeferred: false,
     })
     await $.tool.register({
       name: 'browser_wait',
       description:
-        'Wait (read-only) for a CSS selector, for body text, or for network idle. Returns ok with what was found, or ok: false on timeout; a timeout is a normal result, not an error. Supply at least one of selector, text or idleMs.',
+        'Wait (read-only) for a CSS selector, for body text, or for network idle on the open page. Returns ok with what was found, or ok: false on timeout; a timeout is a normal result, not an error. Supply at least one of selector, text or idleMs.',
       inputSchema: WAIT_SCHEMA,
       isDeferred: false,
     })
     await $.tool.register({
       name: 'browser_screenshot',
-      description: 'Capture the visible page as a PNG image (visual check; slower than a snapshot).',
+      description: 'Capture the visible part of the open page as a PNG image (visual check; slower than a snapshot). A provider without screenshots refuses with a clear message.',
       inputSchema: {
         type: 'object',
         properties: { cols: { type: 'number' }, rows: { type: 'number' } },

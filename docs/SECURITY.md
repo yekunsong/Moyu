@@ -39,6 +39,9 @@
 - [ ] Password values are masked.
 - [ ] Audit covers `snapshot`, `act`, `screenshot`, denials, failures and post-hoc `escaped` navigations.
 - [ ] Link clicks and `clickAt` preflight their destination before the click runs.
+- [ ] Every `Page.screencastFrame` is acknowledged immediately, or Chrome stops the stream; the screencast is cancelled on a mode switch, `/transom close`, pane close, session end and `/stop` (an unfocused pane keeps the 1 s cadence).
+- [ ] Inline PNG sources stay under the engine's 2 MiB decoded limit: an oversized frame lowers detail and then falls back to the text tier with a notice.
+- [ ] The `reader` provider stays in the browser-free path: it fetches only through `ops.fetch`, starts no process, and refuses a navigation whose scheme is not `http:`/`https:` before fetching.
 - [ ] Temporary profiles are removed after `stop`.
 - [ ] Attach mode never launches or closes Chrome: `/stop` detaches and the browser keeps running.
 - [ ] Documentation states that page text is untrusted.

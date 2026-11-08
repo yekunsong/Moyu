@@ -1,6 +1,6 @@
 # Roadmap 0.3 — fidelity, containment and a second provider
 
-Status: planned (2026-11-08)
+Status: implemented (2026-11-09); manual iTerm2/tmux sessions and the 0.3.0 release are pending
 Owner: maintainer (review + direction); implementation by worker agents
 Date: 2026-11-08
 
@@ -15,7 +15,7 @@ Date: 2026-11-08
 - Clicks follow the same tab; a `target="_blank"` target that opens a second tab is out of scope (0.4).
 - Every phase ships its tests and docs; the maintainer runs `npm test` and commits. The release cuts `0.3.0` and moves the Unreleased entries into it.
 
-## Phase F1 — Real-pixel capture and honest layout
+## Phase F1 — Real-pixel capture and honest layout ✅
 
 **Why:** the current frame ties the CSS viewport to the cell box (`columns × 8 × rows × 16`, `deviceScaleFactor: 1`). At 84 columns the page renders 672 px wide, then a HiDPI terminal scales it to twice that: text is soft, and every site lays out as a narrow window.
 
@@ -38,7 +38,7 @@ Date: 2026-11-08
 - Manual: on WezTerm, a 100-column pane shows readable body text at 1:1 zoom; aspect error versus the cell box is under 3%.
 - `npm test` green.
 
-## Phase F2 — Streaming and occlusion resilience
+## Phase F2 — Streaming and occlusion resilience ✅
 
 **Why:** hq polls a full `captureScreenshot` per second. That is slow, re-encodes the whole viewport every frame, and stalls until a BeginFrame that an occluded window never sends — the exact failure the 0.2.1 patch only papers over with retries.
 
@@ -51,7 +51,7 @@ Date: 2026-11-08
 3. Pane: poll at 250 ms while focused and 1 s while unfocused; keep exactly one request in flight (`frameBusy` already guards). After 2 s of `same`, take one high-detail `captureScreenshot` still (detail 2) and continue streaming at detail 1, so a static page is sharp and motion stays cheap.
 4. Screencast metadata (`deviceWidth`, `deviceHeight`, `pageScaleFactor`) feeds the CSS mapping.
 5. Fall back to `captureScreenshot` when the target refuses `Page.startScreencast`; keep the 0.2.1 retry as the fallback path only.
-6. Cancel the screencast on pane hide, mode switch, `/stop` and `Esc`.
+6. Cancel the screencast on a mode switch, `/transom close`, pane close, session end and `/stop`; an unfocused pane keeps the 1 s cadence.
 
 **Acceptance:**
 
@@ -60,7 +60,7 @@ Date: 2026-11-08
 - Manual: motion interval ≤ 250 ms; idle CPU under 5%; disk holds one live frame plus one still, never a growing set.
 - `npm test` green.
 
-## Phase F3 — Terminal coverage and inline image sources
+## Phase F3 — Terminal coverage and inline image sources ✅
 
 **Why:** hq works only where the terminal reads a PNG path itself. iTerm2 needs inline bytes, and tmux needs passthrough.
 
@@ -84,7 +84,7 @@ Date: 2026-11-08
 - Manual: hq on iTerm2 and inside tmux with passthrough.
 - `npm test` green.
 
-## Phase S1 — Click-driven navigation cannot escape the allowlist
+## Phase S1 — Click-driven navigation cannot escape the allowlist ✅
 
 **Why:** host and scheme checks run only on the `navigate` action. A model `click`, `clickAt` or `press Enter` can land on any host, and the hub notices only afterwards when the snapshot comes back. The 0.2 changelog lists this as a known limitation.
 
@@ -103,7 +103,7 @@ Date: 2026-11-08
 - No path reaches an unlisted host without a confirmation or an `escaped` audit entry.
 - `npm test` green.
 
-## Phase C1 — Contract proof: a read-only `reader` provider
+## Phase C1 — Contract proof: a read-only `reader` provider ✅
 
 **Why:** the contract is imported from `providers/browser/` and the hub constructs `BrowserProvider` directly. Until a second adapter exists, every "provider framework" claim is untested.
 
@@ -125,7 +125,7 @@ Date: 2026-11-08
 
 Interactive third-party providers (Minecraft, LINE) move to 0.4.
 
-## Phase Q1 — Gates, docs and release engineering
+## Phase Q1 — Gates, docs and release engineering ✅
 
 1. `once`-policy end-to-end test through the hub (currently only unit-tested in `tests/permissions.test.ts`).
 2. Refresh the README roadmap, the provider guide's action list, and the "known limitations"; document `hqDetail`, tmux/iTerm2 setup and occlusion behaviour. Make the tool descriptions provider-neutral (they currently say `browser_*` and describe DOM-only actions).

@@ -1086,3 +1086,48 @@ test('the reader command validates its URL', async ($, on) => {
   const notUrl = await command($, 'reader nope')
   expect(notUrl.text ?? '').toContain('not a URL')
 })
+
+test('once policy asks one write, then allows non-submits but still asks on submit', { options: { writePolicy: 'once' } }, async ($, on) => {
+  const bottom = installBottom(on)
+  load(on, { writePolicy: 'once' })
+  await start($)
+  await tool($, 'browser_open', { url: 'http://127.0.0.1:1/' })
+
+  // The first model write of the session asks once and then runs.
+  const first = await tool($, 'browser_act', { kind: 'fill', ref: 't2', text: 'a@b.c' })
+  expect(first.text ?? '').toContain('ok')
+  expect(bottom.asks.length).toBe(1)
+  expect(bottom.asks[0] ?? '').toContain('first write')
+
+  // A second non-submit write runs without another prompt.
+  const second = await tool($, 'browser_act', { kind: 'fill', ref: 't2', text: 'c@d.e' })
+  expect(second.text ?? '').toContain('ok')
+  expect(bottom.asks.length).toBe(1)
+
+  // A submit still asks, even after the once-write grant.
+  const submit = await tool($, 'browser_act', { kind: 'press', key: 'Enter' })
+  expect(submit.text ?? '').toContain('ok')
+  expect(bottom.asks.length).toBe(2)
+  expect(bottom.asks[1] ?? '').toContain('submit action')
+
+  // The bridge saw both model fills, then the press.
+  expect(bottom.page.fillCalls).toEqual([
+    { ref: 't2', text: 'a@b.c' },
+    { ref: 't2', text: 'c@d.e' },
+  ])
+  expect(bottom.page.actCalls.some(one => one.kind === 'press' && one.key === 'Enter')).toBe(true)
+
+  // A person's fill never asks; they see the page.
+  const ui = await $.ui.mount({
+    plugin: 'transom',
+    surface: 'terminal',
+    component: 'Pane',
+    props: PANE,
+    requestId: 'transom',
+    viewport: VIEWPORT,
+  })
+  await ui.input({ key: 't2', text: 'person@x.y' })
+  expect(bottom.asks.length).toBe(2)
+  expect(bottom.page.fillCalls.at(-1)).toEqual({ ref: 't2', text: 'person@x.y' })
+  await ui.unmount()
+})
