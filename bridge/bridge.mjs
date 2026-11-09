@@ -984,17 +984,28 @@ async function stopOwnedChrome() {
       /* already gone */
     }
     await sleep(300)
-    // npm-level child trees (renderers, crashpad) can outlive chrome.exe;
-    // taskkill is best effort and must never fail shutdown.
-    try {
-      const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-      })
-      killer.on('error', () => {})
-    } catch {
-      /* taskkill unavailable */
-    }
+    // npm-level child trees (renderers, crashpad) can outlive chrome.exe and
+    // keep the profile locked. Wait for taskkill to finish (bounded) before
+    // shutdown removes the profile, or the removal races the last writers.
+    await new Promise(resolve => {
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        resolve()
+      }
+      try {
+        const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        })
+        killer.on('error', finish)
+        killer.on('exit', finish)
+      } catch {
+        finish()
+      }
+      setTimeout(finish, 3000).unref?.()
+    })
     return
   }
   // POSIX: the child is a process-group leader (spawned detached), so the
@@ -1048,10 +1059,18 @@ async function shutdown(code) {
     }
     cdp?.close()
   }
-  setTimeout(() => {
-    if (profileDir) rmSync(profileDir, { recursive: true, force: true, maxRetries: 2 })
-    process.exit(code)
-  }, 250)
+  // Chrome's own files can stay locked for a moment after both shutdowns; give
+  // rmSync a few retries rather than exiting before the profile is gone.
+  if (profileDir) {
+    const dir = profileDir
+    profileDir = undefined
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    } catch {
+      /* a locked file is not worth blocking exit */
+    }
+  }
+  process.exit(code)
 }
 
 server.listen(0, '127.0.0.1', async () => {

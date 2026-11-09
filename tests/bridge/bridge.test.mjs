@@ -11,6 +11,9 @@ import { startDemo } from '../../demo/server.mjs'
 import { findBrowser } from '../../bridge/paths.mjs'
 
 const TOKEN = randomBytes(16).toString('hex')
+// Temp entries that existed before this suite started; anything new after the
+// bridge stops is a cleanup failure.
+const TEMP_BASELINE = new Set(readdirSync(tmpdir()).filter(name => name.startsWith('transom-')))
 let bridge
 let base
 let demo
@@ -60,8 +63,21 @@ before(async () => {
 
 after(async () => {
   await call('/stop', {}).catch(() => {})
+  await new Promise(resolve => {
+    if (!bridge || bridge.exitCode !== null) return resolve(undefined)
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      resolve(undefined)
+    }
+    bridge.once('exit', finish)
+    setTimeout(finish, 8000)
+  })
   bridge?.kill()
   demo?.server.close()
+  const leftovers = readdirSync(tmpdir()).filter(name => name.startsWith('transom-') && !TEMP_BASELINE.has(name))
+  assert.deepEqual(leftovers, [], 'the bridge left no temp profile or frame directories')
 })
 
 test('health reports a live browser', async () => {

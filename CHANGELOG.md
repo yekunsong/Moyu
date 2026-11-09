@@ -15,6 +15,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- The bridge waits for `taskkill` on Windows and retries profile removal, so a stopped bridge no longer leaves `transom-profile-*` directories behind; the bridge suite now asserts that no temp entries survive a stop.
 - Re-install the page agent after a document load, so a reload, back/forward or page-driven navigation no longer turns the next snapshot or ref action into a `TypeError`. Covered by a bridge regression test.
 - Attach mode forces a compositor frame on connect and retries a dropped capture once; hq image mode now rides out isolated dropped frames instead of falling back to text on the first one. Covered by a pane test.
 - The engine test kit can fail `/frame` on demand, so frame-loss handling is testable in memory.
