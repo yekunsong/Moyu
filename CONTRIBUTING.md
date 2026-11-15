@@ -61,15 +61,13 @@ scanned, so keep engine calls in hooks modules and pure logic elsewhere.
 
 ## Commit messages
 
-English, imperative, [Conventional Commits](https://www.conventionalcommits.org/):
+English, imperative, [Conventional Commits](https://www.conventionalcommits.org/), one line:
 
 ```text
 <type>(<scope>): <summary>
-
-<body: why, not what>
-
-Co-Authored-By: …
 ```
+
+A title only — no body, no trailers. Put the reasoning in the pull request instead.
 
 Scopes in use: `novel`, `pane`, `boss`, `hub`, `engine`, `tools`, `tests`, `docs`.
 
