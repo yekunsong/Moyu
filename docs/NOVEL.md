@@ -1,6 +1,6 @@
 # Novel mode — design (0.4)
 
-Status: implemented (2026-11-12). The browser stack is removed.
+Status: shipped in 0.4 (2026-11-15). The browser stack is removed.
 The framework (provider contract, serial queue, audit, capability gating, supervisor) stays for later adapters.
 
 ## Product

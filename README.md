@@ -250,7 +250,7 @@ telemetry. See [`docs/SECURITY.md`](docs/SECURITY.md).
 - **Text only:** no EPUB/PDF, no network novels, no images, no fonts or spacing controls, no
   non-UTF-8 encodings.
 - **Annotations are in memory** and clear when the file is reopened; progress does not.
-- **Small panes** work but get very short pages; the pane itself compiles down to 20 columns.
+- **Small panes** work but get very short pages; the pane clamps at 20 columns minimum.
 - Early access: the function-hooks API changes between Claude Code releases.
 
 ## Status
