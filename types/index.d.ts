@@ -2,23 +2,16 @@ export type ViewRow = {
   ref: string
   role: string
   label: string
+  /** A provider-specific target, e.g. a library file's real path. */
   value?: string
-  href?: string
-  options?: Array<{ value: string; label: string; selected?: boolean }>
-  invalid?: boolean
-  /** Validation text shown under an invalid row. */
-  error?: string
-  flags?: string
-  submits?: boolean
-  /** The section a row belongs to; a `role: 'section'` row is the heading itself. */
-  section?: string
-  /** Document depth, used for the pane's indent (capped when drawn). */
-  depth?: number
+  /** The paragraph the person clicked, drawn as selected. */
+  selected?: boolean
 }
 
-export type TransomView = {
+export type MoyuView = {
   status: 'closed' | 'starting' | 'ready' | 'error'
-  url: string
+  /** The open file or directory. */
+  path: string
   title: string
   error?: string
   rows: ViewRow[]
@@ -26,15 +19,14 @@ export type TransomView = {
   last?: string
   audit: string[]
   scope: 'viewport' | 'document'
-  mode: 'text' | 'visual' | 'image'
-  /** Set when the page reached an unlisted or denied host by itself. */
-  warning?: string
+  /** How far through the document the page starts, 0 to 100. */
+  percent: number
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    transom: {
-      view: TransomView
+    moyu: {
+      view: MoyuView
     }
   }
 }

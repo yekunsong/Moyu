@@ -1,1 +1,1 @@
-{ "modules": ["./main.tsx"] }
+{"modules": ["./entry.ts"]}

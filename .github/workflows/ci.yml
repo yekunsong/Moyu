@@ -1,47 +1,41 @@
 name: CI
 
-# `claude plugin validate` and `claude plugin test` need the Claude Code CLI,
-# which this repository does not assume on a hosted runner; they stay manual
-# (see CONTRIBUTING.md). This workflow covers the checks that need no engine
-# login: the TypeScript build and the bridge suite against real Chrome.
-
 on:
   push:
+    branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  windows:
-    runs-on: windows-latest
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
 
-      # No lockfile is committed, so `npm ci` cannot run.
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      # Chrome is preinstalled on the runner, but not always on PATH. Pin the
-      # executable via TRANSOM_CHROME, which bridge/paths.mjs checks first.
-      - name: Locate Chrome
-        shell: pwsh
-        run: |
-          $candidates = @(
-            "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-            "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
-            "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
-          )
-          $chrome = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if ($chrome) {
-            "TRANSOM_CHROME=$chrome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          } else {
-            Write-Host "chrome.exe not found in the usual locations; bridge discovery will fall back to its own candidates."
-          }
+      # The hooks API and `claude plugin` live in the Claude Code CLI. Pin the
+      # version so a newer CLI cannot break CI silently. No login is needed:
+      # validate and test run locally.
+      - name: Install the Claude Code CLI
+        run: npm install --global @anthropic-ai/claude-code@2.1.322
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Bridge tests
-        run: npm run test:bridge
+      - name: Validate the plugin
+        run: npm run validate
+
+      - name: Plugin tests
+        run: npm run test:plugin

@@ -2,9 +2,7 @@ export type Capabilities = {
   pointer: boolean
   keys: boolean
   scroll: boolean
-  images: boolean
   text: boolean
-  navigation: boolean
   minCols: number
   minRows: number
 }
@@ -21,20 +19,11 @@ export type SnapshotNode = {
   role: string
   name: string
   depth: number
-  value?: string
-  href?: string
-  options?: Array<{ value: string; label: string; selected?: boolean }>
-  invalid?: boolean
-  /** Nearby validation text; only present when the field is invalid. */
-  error?: string
   interactive?: boolean
-  submits?: boolean
+  /** A provider-specific target, e.g. the real path of a library entry. */
+  value?: string
   state?: {
-    disabled?: true
-    checked?: boolean
-    expanded?: boolean
     selected?: boolean
-    focused?: true
   }
   bounds: { x: number; y: number; w: number; h: number }
 }
@@ -58,31 +47,13 @@ export type Snapshot = {
   truncated: { nodes: number; chars: number; scope: 'viewport' | 'document' }
 }
 
+/** What both a person and the model may ask a provider to do. */
 export type Action =
   | { kind: 'click'; ref: string }
-  | { kind: 'check'; ref: string }
-  | { kind: 'uncheck'; ref: string }
-  | { kind: 'fill'; ref: string; text: string }
-  | { kind: 'select'; ref: string; value: string }
-  | { kind: 'focus'; ref: string }
-  | { kind: 'hover'; ref: string }
-  | { kind: 'press'; key: string; modifiers?: number }
+  | { kind: 'press'; key: string }
   | { kind: 'scroll'; dx: number; dy: number }
-  | { kind: 'clickAt'; x: number; y: number }
-  | { kind: 'wait'; selector?: string; text?: string; timeoutMs?: number; idleMs?: number }
-  | { kind: 'navigate'; url: string }
-  | { kind: 'back' }
-  | { kind: 'forward' }
-  | { kind: 'reload' }
-
-/** What a viewport point lands on, as the bridge describes a click. */
-export type Hit = {
-  x: number
-  y: number
-  desc: string
-  /** Absolute http(s) URL of the enclosing `a[href]`, when there is one. */
-  href?: string
-}
+  /** A provider-specific verb with its own arguments; the novel is all commands. */
+  | { kind: 'command'; name: string; args?: Record<string, unknown> }
 
 export type ActResult = {
   ok: boolean
@@ -90,40 +61,9 @@ export type ActResult = {
   stale?: boolean
   message: string
   url?: string
+  /** A provider's textual answer, e.g. find results. */
+  text?: string
 }
-
-/** How the terminal takes a frame: a PNG path it reads, or inline PNG bytes. */
-export type FrameSource = 'file' | 'png'
-
-type FrameMetrics = {
-  /** Increases with every capture; the same file may hold new bytes. */
-  generation: number
-  columns: number
-  rows: number
-  /** The capture's CSS pixel size (the terminal scales it to the cell box). */
-  pageWidth: number
-  pageHeight: number
-  /** The real PNG pixel size, `detail` times the CSS size in owned mode. */
-  pixelWidth: number
-  pixelHeight: number
-}
-
-export type Frame = FrameMetrics &
-  (
-    | {
-        kind: 'file'
-        /** Absolute path of a PNG the terminal reads itself. */
-        file: string
-      }
-    | {
-        kind: 'png'
-        /** The whole PNG, base64, for terminals that take inline bytes. */
-        data: string
-      }
-  )
-
-/** A streamed frame, or the newest generation when the pane is already current. */
-export type FramePoll = Frame | { same: true; generation: number; streaming?: boolean }
 
 /** A provider may own a supervised process; the hub attaches lifecycle listeners. */
 export type ProviderSupervisor = {
@@ -132,7 +72,6 @@ export type ProviderSupervisor = {
 }
 
 export type ProviderStartOptions = {
-  /** Attach to a browser the person already started. */
   attachPort?: number
 }
 
@@ -156,16 +95,8 @@ export type Provider = {
   start(options?: ProviderStartOptions): Promise<void>
   stop(): Promise<void>
   health(): Promise<{ ok: boolean; url?: string; title?: string; error?: string | null }>
+  /** Open a provider-specific path; the novel provider opens its library. */
+  open?(path: string): Promise<ActResult>
   snapshot(request: SnapshotRequest): Promise<Snapshot>
   act(action: Action, context: ActContext): Promise<ActResult>
-  screenshot?(cols: number, rows: number): Promise<{ pngBase64: string; cols: number; rows: number }>
-  raster?(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
-  /** A real-pixel PNG, as a file or inline bytes for the terminal's image tier. */
-  frame?(cols: number, rows: number, detail?: number, source?: FrameSource): Promise<Frame>
-  /** The newest streamed frame, when the provider pushes frames. */
-  latestFrame?(since: number, source?: FrameSource): Promise<FramePoll>
-  /** Leave image mode: restore the viewport the other tiers expect. */
-  stopFrame?(): Promise<void>
-  /** Describe a viewport point and any enclosing link, before clicking it. */
-  hitAt?(x: number, y: number): Promise<Hit>
 }

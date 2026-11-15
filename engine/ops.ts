@@ -11,6 +11,8 @@ export type Ops = {
   log: (text: string) => void
   status: (text: string | undefined) => void
   toast: (text: string) => void
+  // The kept supervisor still speaks over fetch and a child process; a novel
+  // provider itself uses neither.
   fetch: (url: string, init?: HttpInit) => Promise<HttpResponse>
   spawn: (request: ProcessSpawnRequest) => HookStream<ProcessSpawnChunk, ProcessSpawnResult>
   storeGet: (key: string) => Promise<unknown>
@@ -19,11 +21,13 @@ export type Ops = {
   after: (ms: number, fn: () => void) => Timer
   openPane: (args: PaneOpenArgs) => Promise<UiOpenResult>
   closePane: (id: string) => Promise<void>
-  /** Terminal identity for image-tier detection; names are spelled at the call site. */
-  env: {
-    term: () => Promise<string | undefined>
-    termProgram: () => Promise<string | undefined>
-    wtSession: () => Promise<string | undefined>
-    tmux: () => Promise<string | undefined>
-  }
+  /** File text; the novel provider reads its own library with these. */
+  readText: (path: string) => Promise<string>
+  listDir: (path: string) => Promise<Array<{ name: string; kind: string; size: number; mtimeMs: number; isLink: boolean }>>
+  statPath: (
+    path: string,
+    resolve?: boolean,
+  ) => Promise<{ kind: string; size: number; mtimeMs: number; isLink: boolean; realPath?: string }>
+  /** Put text in the prompt box as the draft. */
+  fillPrompt: (text: string) => Promise<void>
 }

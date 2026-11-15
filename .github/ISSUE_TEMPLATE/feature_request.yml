@@ -1,0 +1,23 @@
+name: Feature request
+description: A reading, camouflage or model-channel idea.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The reading situation
+      description: What are you doing when moyu gets in the way or stops short?
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: The smallest useful shape
+      description: A key, a command, a config value. Say what stays out of scope.
+  - type: checkboxes
+    id: light
+    attributes:
+      label: Fit
+      options:
+        - label: It does not need a process or network access.
+        - label: It can live behind an existing command/key.

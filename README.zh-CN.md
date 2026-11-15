@@ -1,360 +1,280 @@
-# Transom（窗侧）
+# moyu 摸鱼
 
 [English](README.md) | **简体中文**
 
-> 在 Claude Code 会话里，为任意应用开一扇可看、可操作、可被模型调用的边窗。
+> 在 Claude Code 会话里假装工作的一个小说阅读器。
 
+[![CI](https://github.com/yekunsong/Moyu/actions/workflows/ci.yml/badge.svg)](https://github.com/yekunsong/Moyu/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.x-6f42c1)](https://code.claude.com)
 [![Status](https://img.shields.io/badge/status-early%20access-orange)](#状态)
-[![Claude%20Code](https://img.shields.io/badge/Claude%20Code-2.1.319-6f42c1)](https://code.claude.com)
 
-```bash
-/plugin install transom --marketplace <owner>/<repo>
+moyu 把 Claude Code 会话的一侧变成一页正文。它借用**你自己**的主题、长得像命令输出，一个键就能收起；模型读同一页，并用同样的样式留下批注。
+
+没有浏览器、没有守护进程、没有网络：一个文本目录，一块窗格。
+
+```text
+novels/01-night-ferry.txt · 37%
+第一章 夜航
+
+渡口的灯在雾里只剩一团黄。阿桂把缆绳在手心绕了两圈，
+船身便轻轻贴住石阶。
+
+他数着岸上的脚步声，一遍又一遍。
+
+· AI 雾、玻璃和潮汐——三样让人看不清的东西。
+空格/j/k 翻页 · n/p 章节 · a 引用 · q 隐藏
+q 隐藏
 ```
-
-Transom 把外部应用压成一对接口——`snapshot()` 读结构化状态、`act()` 执行结构化动作——画在会话侧栏里。人和模型共用同一条通道，每个动作都留痕，写操作受权限约束。
-
-窗口从外部搬进终端只是副产品。真正的产出是**结构化、可寻址、可审计的应用状态**。
 
 ---
 
 ## 目录
 
-- [为什么是 Transom](#为什么是-transom)
-- [特性](#特性)
-- [状态](#状态)
-- [依赖](#依赖)
+- [为什么](#为什么)
+- [功能](#功能)
+- [环境要求](#环境要求)
 - [安装](#安装)
 - [快速开始](#快速开始)
 - [命令](#命令)
+- [键盘](#键盘)
 - [模型工具](#模型工具)
-- [面板操作](#面板操作)
 - [配置](#配置)
+- [书库](#书库)
 - [架构](#架构)
-- [安全](#安全)
-- [引擎调研](#引擎调研)
-- [渲染分档](#渲染分档)
+- [安全与隐私](#安全与隐私)
 - [兼容性与限制](#兼容性与限制)
-- [开发](#开发)
+- [状态](#状态)
 - [路线图](#路线图)
-- [竞品位置](#竞品位置)
-- [开放问题](#开放问题)
-- [术语](#术语)
-- [参考](#参考)
-- [许可](#许可)
+- [开发](#开发)
+- [常见问题](#常见问题)
+- [参与贡献](#参与贡献)
+- [许可证](#许可证)
 
-## 为什么是 Transom
+## 为什么
 
-### 成立的场景
+上班看书，最好看起来像在工作。浏览器标签页或阅读器切走一个 alt-tab 就会露馅；会话里一块 `less` 形状的窗格不会。
 
-- **终端是唯一入口。** SSH 远程机、容器、tmux。桌面版有 Browser pane 和 DOM/点击工具，但**到不了那些机器**——官方文档明说 SSH 会话没有这些工具。
-- **会话比连接活得久。** tmux/screen 会话可跨换机、换网；桌面窗口不行。
-- **没有图形环境。** 服务器、CI、无 X 的容器，连浏览器窗口都没有。
-- **模型需要的是注册动作，不是截图。** Transom 把 `snapshot`/`act` 注册成本会话的工具：不走 Bash、不带 shell 引号、结果有类型、有可见区预算，任何终端都成立。
-- **同屏审查。** 转录和画面在一个视图里：改完立刻看、看错立刻说，不用切窗口。
+moyu 围绕三个小想法：
 
-### 不成立的场景（明确让位）
+1. **伪装。** 默认完全不设置主题。正文继承会话自己的文字颜色，边框信息用 dim，标题没有框线。它读起来就是又一段输出。
+2. **老板键。** `q` 立刻收起窗格；一句空的 `/moyu` 回到同一段，没有打开的书记则回到上一本。
+3. **共享通道。** 模型通过注册工具读同一页并加批注；选中一段按 `a` 把它引用进 prompt 再提问。
 
-| 需求 | 该用什么 |
-|---|---|
-| 本地开发、看排版、视频、精细拖拽、多标签浏览 | 桌面版 Browser pane / 真浏览器 |
-| 本地纯写代码、不碰界面 | CLI 本身就够 |
-| 像素级保真的验收 | 桌面版 |
+它刻意很小：文本进，文本出，进度落盘，别的都不做。
 
-**Transom 是远程重度用户的基础设施，不是桌面版的替代品。** 人群小、天花板低（格子分辨率、2–5 fps），但“会话内可见 + 模型可调用”这一截目前仍缺一个 Transom 这样的答案。
+## 功能
 
-## 特性
+- **纯文本页面。** 段落与章节标题，按视口翻页，dim 的路径和百分比抬头。没有阅读器外壳。
+- **继承配色。** `theme: "auto"`（默认）从不调用 `$.theme.set`，窗格跟随你自己的终端与 Claude Code 主题。`mono`、`paper`、`ink` 是需要显式选择的预设。
+- **老板键。** `q`、Escape、`/moyu`（无参）或 `/moyu hide`。打开会请求焦点，Escape 直接关闭，窗格背景透明。
+- **续读。** 章节与偏移按文件存在 `moyu.progress.<hash>`；空 `/moyu` 会按保存处重开上一本，收起不会丢位置。
+- **书库守卫。** 只放行解析后根目录内的 `.txt`、`.md`、`.text` 普通文件；软链接按真实路径判断。
+- **目录书架。** 打开目录会列出可读文件；空窗格会列出最近阅读。
+- **共享批注。** `mcp__moyu__annotate` 给段落 ref 加注；批注以 `· AI` 开头、同色斜体，紧跟在锚点段之后。
+- **ask about ¶。** 点选一段后按 `a` 或脚注按钮，经 `$.prompt.fill` 引用进 prompt，不自动提交。
+- **自动隐藏。** `autoHideSeconds` 在空闲后收起；任何按键都会重新计时。
+- **有审计。** 人和模型共用一条串行队列和一份审计环。
 
-- **人和模型同一条通道。** 面板与 `mcp__transom__*` 工具进同一个串行动作队列；每条动作记录发起者、目标、策略、结果与耗时。
-- **结构化快照，不是截图。** 带稳定 ref 的对象图：role、无障碍名、值、状态、边界。ref 带文档代际，导航后不会悄悄重绑；失效返回 `stale`，不会误点。
-- **由第二个适配器证明的 Provider 框架。** 能力协商、白名单、队列与审计都在 hub；浏览器只是一个适配器，只读的 `reader` 是另一个。hub 不导入任何 provider 代码，并拒绝 provider 能力缺少的动作。
-- **默认受权限约束。** 只允许 http(s)、主机白名单（localhost 恒允许）、模型写操作逐次确认（或 `once`/`auto`）、只接受精确的 Allow 标签、失败即拒绝。点击链接与 `clickAt` 会在点击前预检目标；页面脚本自行跳到白名单外主机时，会显示带 **back** 与 **allow host** 的 `escaped` 警告并入审计。
-- **全量审计。** 人与模型动作进同一环形缓冲并持久化到 `$.store`；填写内容脱敏。
-- **三档渲染。** 文本档（按钮、输入框、分区，任何终端）、彩色格档（半格块 Raster，24 位色）与 HQ 图像档（kitty、Ghostty、WezTerm 与 iTerm2 3.5+ 上的真实 PNG 画面，tmux 内经 passthrough 亦可）；窄面板降级为摘要行。
-- **行内编辑与结构。** 文本框和下拉框原地编辑；行按页面标题分区，带状态栏与分块翻页。
-- **崩溃隔离且可移植。** 受监督的本地 bridge 独占无头 Chromium；健康检查、退避重启、空闲自停、进程树清理、Linux/macOS 浏览器发现，测试已在 WSL 验证。
-- **接管模式。** `/transom attach <port>` 镜像你已运行的 Chrome（连同登录态），关闭时只断开、不退出浏览器。
-- **无浏览器阅读。** `/transom reader <url>` 用 `ops.fetch` 抓取页面，以文本显示标题、链接、段落与列表。它只支持文本，不执行 JavaScript、不保存 Cookie、无法登录；指针、键盘、滚动、图像与表单动作会带着缺失的能力被拒绝。
-- **模型端易用性。** 增量快照、`browser_find`、`browser_wait`，以及对话框自动处理（alert 接受；confirm/prompt 拒绝）。
-- **页面内容按不可信数据处理。** 快照带显式横幅；页面字符串在进对话框前剥掉控制字符；点击前做 `elementFromPoint` 命中测试，遮挡会报告 `covered`。
+## 环境要求
 
-## 状态
+- Claude Code 2.1.x，开启功能钩子（`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`），在**交互式终端**里。
+- Node.js 22+。
+- 一个存放 UTF-8 `.txt`、`.md` 或 `.text` 的书库目录。
 
-0.3 进行中（正式发版前包版本仍为 0.2.0）；early access。Claude Code 的 function hooks 接口处于 early access，版本间可能变化。M0–M5 与 0.2 的全部阶段（文本 UI、HQ 图像档、接管模式、Linux、模型易用性、安全打磨）均已完成。0.3 的各阶段已经实现——真实像素捕获（F1）、screencast 流式刷新（F2）、iTerm2/tmux 内联 PNG（F3）、点击导航约束（S1）、只读 provider（C1），以及文档与门禁（Q1）——iTerm2/tmux 的手工会话仍待验证；设计与偏差见 [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md)、[`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md) 与 [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md)。
-
-## 依赖
-
-- Claude Code 2.1.x，启用 function hooks（`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`），运行在**交互式终端**。
-- Node.js 20+（推荐 22）。
-- 本机已安装 Chrome / Chromium / Edge 之一，或用 `TRANSOM_CHROME` 指定可执行文件。
+不需要 Chrome、不需要额外进程、不需要自己的 API key。
 
 ## 安装
 
-在终端会话里：
+在会话里：
 
-```bash
-/plugin install transom --marketplace <owner>/<repo>
+```text
+/plugin install moyu --marketplace yekunsong/Moyu
 ```
 
-开发时从目录加载：
+从检出目录开发：
 
 ```bash
+git clone https://github.com/yekunsong/Moyu.git
+cd Moyu
 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
-  claude --plugin-dir D:/Study/transom
+  claude --plugin-dir "$PWD"
 ```
 
-`CLAUDE_CODE_NO_FLICKER=1` 开启全屏布局：面板停靠右侧，**鼠标点击才能到达按钮**。没有它时面板画在提示符上方（inline），鼠标事件到不了；用 `ctrl+x tab` 把键盘交给面板，再用 Tab/Enter。
-
-> 官方文档说 function hooks 只支持交互式终端。实测 2.1.319 的 `claude -p` 也会加载插件工具（`--allowedTools mcp__transom__…` 可用于无头验证），但这是 early access 行为，不保证后续版本。
+`CLAUDE_CODE_NO_FLICKER=1` 打开全屏布局：窗格停靠右侧，鼠标可达。内联窗格只有键盘——`ctrl+x tab` 给它键盘，Escape 归还。
 
 ## 快速开始
 
-```text
-/transom demo          # 启动本地演示页并在面板中打开
+```bash
+mkdir -p novels
+cp fixtures/novel/* novels/
 ```
 
-在面板里点击 **Increase count**。然后对模型说：
+```text
+/moyu 01-night-ferry.txt
+```
 
-> 先调用 `mcp__transom__browser_snapshot`，再用 `browser_act` 点击名为 "Increase count" 的按钮，然后重新快照并报告计数。
+用 `↓`/`↑`、`space`/`b`、`j`/`k` 或鼠标阅读。点一段选中，按 `a` 放进 prompt。`q` 收起，`/moyu` 回到同一页。
 
-模型的写操作会先确认。`/transom audit` 会显示两条记录，分别归属 `person` 与 `model`。
+让模型：
+
+> 调用 `mcp__moyu__read`，再对第二段调用 `mcp__moyu__annotate` 写一行注，然后重新读这一页。
+
+批注会以正文样式出现在该段之后。
 
 ## 命令
 
 | 命令 | 作用 |
 |---|---|
-| `/transom` | 打开面板 |
-| `/transom open <url>` | 打开面板并导航（默认只允许 localhost/127.0.0.1 与配置的主机） |
-| `/transom reader <url>` | 在无浏览器、只读的 provider 中把页面读成文本（仅 http/https） |
-| `/transom demo` | 启动本地演示页（计数、表单、列表、canvas、shadow DOM、iframe、长滚动）并打开 |
-| `/transom attach <port>` | 连接已用 `--remote-debugging-port=<port>` 启动的 Chrome；`/transom close` 只断开，不关闭浏览器 |
-| `/transom allow <host\|url>` | 本次会话允许某主机（精确匹配或 `*.` 通配）；优先于配置白名单，并写入审计 |
-| `/transom deny <host\|url>` | 本次会话拒绝某主机；优先于配置白名单与会话允许，并写入审计 |
-| `/transom audit` | 最近 20 条审计 |
-| `/transom close` | 关闭面板并停止浏览器（attach 模式下仅断开连接） |
+| `/moyu` | 开关窗格（老板键）。没有书时恢复上一本 |
+| `/moyu <path>` | 打开书库根下的文件，或把目录作为书架打开 |
+| `/moyu hide` / `/moyu show` | 显式收起 / 显示 |
+| `/moyu theme <auto\|mono\|paper\|ink>` | 跟随自己的配色（默认）或设预设 |
+| `/moyu close` | 丢下书并关闭窗格 |
 
-reader 与浏览器共用同一套主机白名单、队列与审计，但从不启动 Chrome。它不执行 JavaScript、不继承登录态、不渲染图像；页面需要这些时请用 `/transom open`。
+没有打开书时，`/moyu show` 会按保存位置重开上一本；最近列表为空则显示书架。
 
-会话授权以人的实时决定为准：`/transom allow` 与 `/transom deny` 接受主机名或完整 URL，仅在本次会话内生效，并以 `person allow <host>` / `person deny <host>` 写入审计。拒绝始终优先（包括 `localhost` 与会话允许）；再执行相反命令即可撤销先前的授权。
+## 键盘
 
-### 连接到你自己启动的浏览器
+窗格是 less 形状的。
 
-除自行启动浏览器外，Transom 也可以镜像并控制一个已在运行的 Chrome。先用调试端口启动 Chrome（该参数只对新进程生效，请先完全退出 Chrome），再连接：
+| 键 | 动作 |
+|---|---|
+| `↑` `↓` `←` `→`、`space` `b`、`j` `k` | 翻页 |
+| `n` / `p` | 下一章 / 上一章 |
+| `g` / `G`、`home` / `end` | 章首 / 章尾 |
+| 点击 | 选中一段 |
+| `a` | 把选中段引用进 prompt |
+| `q`、`Escape` | 立刻收起 |
+| `ctrl+g` | 窗格持有键盘时收起 |
 
-```text
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir=%TEMP%\transom-chrome
-/transom attach 9222
-```
-
-面板会接管第一个标签页（优先 http/https 页面）并原地操作；`/transom close` 只断开，Chrome 继续运行。把临时目录换成你常用的 profile 目录即可继承该浏览器的 Cookie 与登录状态。详见 [`docs/SECURITY.md`](docs/SECURITY.md)。
+`q` 既是 Client 键也是 Button hotkey，所以 `ctrl+x tab` 或 `closeOnEscape` 之后没有鼠标也能用。`ctrl+g` 在 Chat 上下文是宿主的外置编辑器和弦；窗格只在自己持键时吞掉它，所以老板键是 `q`。
 
 ## 模型工具
 
-| 工具 | 权限 | 用途 |
-|---|---|---|
-| `mcp__transom__browser_open` | 写（导航） | 打开面板并导航；白名单外主机需确认 |
-| `mcp__transom__browser_snapshot` | 读 | 结构化快照；`sinceLast: true` 只回新增/移除/变化的 ref |
-| `mcp__transom__browser_find` | 读 | 在当前快照里按文本、role 或可交互性过滤，不重新读页面 |
-| `mcp__transom__browser_wait` | 读 | 等待 CSS selector、正文文本或网络空闲；超时是正常结果 |
-| `mcp__transom__browser_act` | 读/写 | `click`、`check`、`uncheck`、`clickAt`（视口像素）、`fill`、`select`、`press`、`scroll`、`hover`、`focus`、`navigate`、`back`、`forward`、`reload` |
-| `mcp__transom__browser_screenshot` | 读 | 截取可见区 PNG，用于视觉检查 |
-| `mcp__transom__browser_audit` | 读 | 最近动作及其发起者与结果 |
+| 工具 | 用途 |
+|---|---|
+| `mcp__moyu__open` | 打开书库文件或目录 |
+| `mcp__moyu__read` | 读当前页；`next` / `prev` / `chapter` 先翻页或跳章 |
+| `mcp__moyu__find` | 全文查找，最多 20 条摘录 |
+| `mcp__moyu__annotate` | 给段落 ref 加注 |
+| `mcp__moyu__turn` | 按带符号增量翻页 |
+| `mcp__moyu__boss` | 显示、收起或开关窗格 |
 
-快照默认返回可见区；`scope: "document"` 请求整页。两者都受 `snapshotMaxChars` 限制。ref 在下一次快照或导航前有效。
-
-工具名里的 `browser_` 前缀为兼容性保留，provider 本身可插拔：同一组工具驱动当前启用的 provider，包括只读的 `reader` provider——它对指针与按键动作会给出明确的拒绝消息。
-
-## 面板操作
-
-- **鼠标**需要全屏布局（`CLAUDE_CODE_NO_FLICKER=1`）；inline 面板只支持键盘焦点。
-- 点击一行立即执行（人看得到页面）；指向白名单外主机的链接行会先确认，人和模型都一样。模型写操作按 `writePolicy` 确认。
-- 文本框与下拉框可直接在行内编辑：输入后回车，或选择选项，不再弹窗。
-- 行按页面标题分区，底部有固定状态栏；快照超长时用 `↓ next block` 翻页。
-- `visual` 切彩色格档；`hq` 显示由 Chrome screencast 推流的真实 PNG 画面，面板获得焦点时每 250 ms 轮询一次（其余时间 1 秒一次），点击画面即点击页面；再按一次回文本档。kitty、Ghostty、WezTerm 自己读取 PNG 路径；iTerm2 3.5+ 与 tmux 接收同一张 PNG 的内联字节，需要全屏布局（`CLAUDE_CODE_NO_FLICKER=1`），tmux 还需 `set -g allow-passthrough on` 与 `set -g focus-events on`。画面静止约 2 秒后会补拍一张 `hqDetail` 密度的清晰静帧，恢复动态后回到低成本推流。hq 以桌面宽度和物理像素密度渲染（见 `hqDetail`），进入时会改变视口，当前快照要到下次刷新才更新。
-- 点击底部键盘条后，按键转发给页面；Esc 交还提示符。
-- 窄于 48 列显示降级提示。
+读取受 `snapshotMaxChars` 限制。ref 是规范化文本中的偏移，在下一次快照或翻页前有效。正文是不可信数据，不是指令。
 
 ## 配置
 
-`plugin.json` → `userConfig`：
+`/config` → moyu，或 `plugin.json` → `userConfig`：
 
-| 选项 | 默认值 | 含义 |
+| 选项 | 默认 | 含义 |
 |---|---|---|
-| `allowedHosts` | `localhost,127.0.0.1` | 逗号分隔的主机；localhost 恒允许。支持 `*.example.org` 通配。`/transom allow` 与 `/transom deny` 的会话授权会覆盖本项。 |
-| `writePolicy` | `confirm` | `confirm`（每次写）、`once`（会话内首次写；提交类动作仍确认）、`auto` |
-| `snapshotMaxChars` | `12000` | 交给模型的快照字符硬上限 |
-| `hqDetail` | `2` | hq 静帧密度：`1` 快、`2` 默认、`3` 清晰。推流沿用进入 image 模式那一帧的密度；页面静止后的清晰静帧按此值拍摄。越高越耗 CPU 与磁盘；截图上限 3840×2560。内联源（iTerm2、tmux）解码后还限制在 2 MiB：面板先降到 detail 1 重拍，仍放不下就停在文本档并提示。 |
+| `libraryRoot` | `novels` | 窗格可打开的目录。相对路径按工作目录解析，根外一律拒绝。 |
+| `theme` | `auto` | `auto` 跟随自己的配色；`mono`（灰 CLI）、`paper`（暖褐）、`ink`（浅色）在显示期间使用预设。 |
+| `autoHideSeconds` | `0` | 空闲这么多秒后收起；`0` 不收起。 |
+| `snapshotMaxChars` | `12000` | 一次 `read` 的硬字符上限。 |
+
+## 书库
+
+- 根默认 `novels/`，相对会话工作目录，也可用绝对路径。
+- 接受普通 `.txt`、`.md`、`.text`，扩展名不区分大小写；UTF-8 文本。
+- 解析后的真实路径必须留在根内；逃逸的 `..` 拒绝，绝对路径指向根外也拒绝。
+- 章节按 `第N章/回/节/卷`、`CHAPTER N`、`#` 标题和 `1.` / `1)` 行切分。没有标题的文档是一整章；首行不超过 60 字时作为书名。
+- CRLF 与 BOM 归一化，保留 tab，丢弃其他控制字符。单段上限 2,000 字符。
+
+完整设计见 [`docs/NOVEL.md`](docs/NOVEL.md)，适配器契约见 [`docs/PROVIDERS.md`](docs/PROVIDERS.md)。
 
 ## 架构
 
-依赖向内：只有 hooks 模块触碰引擎 API。
-
 ```text
-hooks/main.tsx          注册、命令、面板、Ops 字面量
-hooks/tools.ts          五个模型工具与输出投影
-engine/ops.ts           $ 的窄接口
-engine/adapter.ts       fetchJson / ask / store 包装
-engine/supervisor.ts    bridge 进程、握手、健康、退避、停止
-hub/hub.ts              串行动作队列、视图模型、审计接线
-hub/permissions.ts      协议/主机白名单、动作分级
-hub/audit.ts            环形缓冲 + $.store 持久化
-hub/negotiate.ts        能力协商与降级
-providers/browser/      provider 合同、HTTP 客户端、面板行/键盘
-bridge/                 回环 HTTP + CDP + 注入页面的 agent
-demo/                   演示应用与静态服务器
-tests/                  插件测试、supervisor 单测、bridge E2E
+hooks/entry.ts        唯一的 hooks 模块：captures、工具、命令、窗格
+hooks/main.tsx        窗格渲染、按键路由、Ops 字面量
+hooks/boss.ts         显隐、主题预设、空闲隐藏
+hooks/tools.ts        工具 schema 与处理器
+hub/hub.ts            串行动作队列、能力门禁、视图模型
+hub/audit.ts          环形缓冲 + $.store 持久化
+engine/provider.ts    适配器契约
+engine/ops.ts         适配器可见的 $ 窄切片
+providers/novel/      书库守卫、解析、分页、provider、按键条
+tests/                内存书库上的插件套件
 ```
 
-### Provider 合同
+依赖指向内层。只有 `hooks/` 碰 `$`；只有 `providers/` 碰外部世界——这里是目录。Hub 与 provider 无关，并在执行前按声明的能力门禁。
 
-```ts
-type Provider = {
-  readonly meta: {
-    id: string
-    label: string
-    capabilities: {
-      pointer: boolean; keys: boolean; scroll: boolean; images: boolean
-      text: boolean; minCols: number; minRows: number
-    }
-    allowSchemes: string[]
-    defaultWidth: number
-  }
-  start(): Promise<void>
-  stop(): Promise<void>
-  health(): Promise<{ ok: boolean; url?: string; title?: string; error?: string | null }>
-  snapshot(request: { scope: 'viewport' | 'document'; maxChars: number; cols: number; rows: number }): Promise<Snapshot>
-  act(action: Action, context: { actor: 'person' | 'model' }): Promise<ActResult>
-  screenshot?(cols: number, rows: number): Promise<{ pngBase64: string }>
-  raster?(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
-}
-```
+Provider 实现 `open` / `snapshot` / `act`；`snapshot` 返回带角色的节点与字符偏移 ref，`act` 接受 `click`、`press`、`scroll` 和 provider `command`。保留契约是为了以后接游戏适配器。
 
-ref 必须来自应用自身的对象身份，不能是坐标或下标。ref 失效时 provider 必须报告 `stale`，绝不能悄悄操作另一个元素。详见 [`docs/PROVIDERS.md`](docs/PROVIDERS.md)。
+## 安全与隐私
 
-### 关键机制
-
-- **能力协商：** 窄面板、无指针/键盘支持的终端降级为文本档或摘要行。
-- **Supervisor：** 每个 provider 一个 bridge；握手、健康轮询、指数退避、空闲自停、进程树清理。
-- **共用队列：** 权限判定、确认、执行在一个临界区；页面不会在“允许”与动作之间被换掉。
-- **上下文策略：** 可见区 + 地标摘要；整页需显式请求且始终设上限。
-- **失败即拒绝：** 只有精确的 `Allow` 标签会批准；自由文本或关闭对话框都算拒绝。
-
-## 安全
-
-见 [`docs/SECURITY.md`](docs/SECURITY.md)。简述：bridge 是回环 HTTP 服务，每次启动生成随机 bearer token 并拒绝浏览器 `Origin`；Chrome 使用一次性 profile（attach 模式沿用你自己启动的浏览器）；导航仅 http(s) 且受主机白名单约束；密码值遮蔽；页面文本是不可信数据，不是指令；所有动作入审计。
-
-链接与 `clickAt` 会预检目标：目标不在白名单时，即便 `once`/`auto` 也要先确认；被拒绝的协议或主机会直接不点击。页面自行发起的导航——脚本跳转，或 `press Enter` 触发的表单提交——无法预检；hub 会在动作后比较主机，以 `escaped` 入审计，并显示带 **back** 与 **allow host** 的警告。
-
-## 引擎调研
-
-于 Claude Code 2.1.319、本地交互式终端实测。
-
-### 可用
-
-| 能力 | API |
-|---|---|
-| 侧栏面板 | `$.ui.open({ id, title, columns })`；被请求后 ≥110 列停靠（未被请求需 144 列） |
-| 渲染 | `Client` 树、`Raster`（每格 u32 `[码点, 前景, 背景]`）、`Image`、`Svg`、`Markdown`、`Code` |
-| 帧钟 | `surface.every(ms, fn)`；重绘 ≤10/s（终端面板显示中 30/s）；`$.ui.blit` 实收约 60/s |
-| 指针 | `surface.onPointer` 的 `down/move/up/enter/leave`；kitty、Ghostty、iTerm2、WezTerm、foot 有亚格 `fine.x/y` |
-| 键盘 | 点击夺焦后 `surface.onKey`；Esc 必还 |
-| 尺寸 | `Client` 的宽高支持百分比；`surface.columns/rows` 为实测格数 |
-| 多表面 | 同一棵树按 `e.surface` 区分 terminal/desktop/vscode/mobile |
-| 外部进程 | `$.process.spawn`（stdout 流、stdin 一次性）、`$.process.run` |
-| 网络 / 文件 | `$.http.fetch`、`$.mcp.connect`；`$.fs` 单次读 ≤4 MiB |
-| 模型接口 | `$.tool.register`、`$.session.append`、`$.ui.ask` |
-| 状态 | `$.state`（会话）/ `$.store`（跨会话），带类型契约 |
-
-### 硬约束
-
-1. **`spawn` 的 stdin 一次性，没有 PTY。** 交互程序必须自带控制端口（CDP / JSON-RPC / socket）或改成单次进程。
-2. **`Client` 不能嵌 `Raster`/`Image`。** 高帧率与指针输入需要合成层：Raster 铺像素，极薄 Client 收指针。
-3. 连续三次 `setState` 且无事件会触发渲染循环检测并卸载实例。
-4. 单树上限 2 万节点 / 10 万字符；Raster 单块 512×256。
-5. 终端没有 key-up；tmux 不透传亚格 `fine` 坐标。
-6. 鼠标仅在开屏全屏布局（`CLAUDE_CODE_NO_FLICKER=1`）下可用。
-7. 需要 `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`。官方仅支持交互式；2.1.319 的 `-p` 也能加载工具（见[安装](#安装)）。
-8. early access：接口会随版本变化。
-
-## 渲染分档
-
-| 档 | 内容 | 成本 | 状态 |
-|---|---|---|---|
-| 文本 | 文字、链接、表单结构，带色 | 低 | 已实现 |
-| 彩色格 | Raster 降采样、24 位色、按行可点 | 中 | 已实现（`visual`） |
-| 图像（HQ） | `Image` + PNG 文件源（kitty、Ghostty、WezTerm）或内联 PNG 字节（iTerm2 3.5+、tmux） | 中 | 已实现（`hq`），推流刷新 |
-
-颜色是真的 24 位前景/背景，不是黑白。但格子终究是“像”不是“是”：小字号会糊，圆角阴影会消失。HQ 画面按 1–3 倍密度捕获，每张可达 1–4 MB。
+一切都在本地。读取被限制在解析后的根内，扩展名与真实路径都检查，正文按数据对待。窗格只填 prompt，从不提交。没有遥测。见 [`docs/SECURITY.md`](docs/SECURITY.md)。
 
 ## 兼容性与限制
 
-- **终端：** kitty、Ghostty、iTerm2、WezTerm、foot 全功能；Windows Terminal、GNOME 降级；tmux 失去亚格精度。
-- **平台：** Windows、Linux、macOS 浏览器发现；bridge 测试已在 WSL Ubuntu（Node 22 + chrome-headless-shell）跑通。
-- **仅交互式：** 桌面版、移动端、无头会话不画面板。
-- **仅无头 Chrome：** 默认无登录态、无扩展、无音频、无多标签。
-- **Canvas 无语义：** canvas 内容以图像参与，不是节点。
-- **Raster 为手动刷新：** `visual` 按需重绘；`hq` 通过 Chrome screencast 推流（有焦点时 250 ms 轮询，其余 1 秒），页面静止时补一张清晰静帧。
-- **HQ 终端：** `hq` 需要终端自己读取 PNG 路径（kitty、Ghostty、WezTerm），或接收内联 PNG 字节（iTerm2 3.5+，以及开启 `allow-passthrough` 与 `focus-events` 的 tmux）；内联渲染要求全屏布局，tmux 还需开启这两个选项，Windows Terminal 留在文本档。
-- **内联负载上限：** 内联源把解码后的 PNG 控制在 2 MiB 以内。面板先降到 detail 1 重试，仍放不下则留在文本档并给出提示。
-- **逃逸导航只是兜底：** link click 与 clickAt 在运行前预检，但脚本重定向或表单提交（`press Enter`）仍可能落到别的主机。hub 会记为 `escaped` 并显示 **back** / **allow host**；在 `auto` 下这不是预防。
+- **终端：** 任何能画窗格的终端，不需要图形协议。
+- **平台：** Windows、Linux、macOS；两种路径形状都会折叠。
+- **仅交互：** 无头 `-p` 会加载工具，但不画窗格。
+- **仅文本：** 不做 EPUB/PDF、不读网络小说、不支持图片、字体或间距、非 UTF-8 编码。
+- **批注只在内存**，重开文件即清空；进度不会。
+- **窄窗格**能用，但页会很短；窗格本身最低 20 列。
+- 早期访问：功能钩子 API 会随 Claude Code 版本变化。
+
+## 状态
+
+0.4，早期访问。0.1–0.3 是浏览器线；0.4 用阅读器替换它，同时保留契约、队列、门禁、审计和监督器给后续适配器。钩子 API 稳定前版本号可能快速变化。
+
+## 路线图
+
+- 加固：更多解析边界、批注开关、单书书签。
+- 在裁剪后的契约上做游戏适配器。
+- 可选的第三方 provider。
+
+不做：网络小说、EPUB、正文图片、多窗格焦点。
 
 ## 开发
 
 ```bash
-npm test          # 类型检查 + 插件校验 + 插件测试 + bridge E2E
 npm run typecheck
 npm run validate
 npm run test:plugin
-npm run test:bridge
+npm test                 # 以上三项
 ```
 
-- `tests/bridge/bridge.test.mjs` 启动演示服务器与真实无头 Chrome：快照、点击、填写、shadow DOM、iframe、Raster、失效 ref、遮挡目标、密码遮蔽。
-- `tests/*.test.ts` 在引擎测试套件里用内存 fake bridge：权限、审计、渲染、降级、重启竞态。
-- 提交信息遵循 Conventional Commits（`feat:`、`fix:`、`docs:`、`chore:`），英文、祈使句。见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+套件覆盖解析、分页、守卫、provider、hub、窗格与工具，全部跑在内存书库上；CI 在 Linux、Node 22 上执行。没有正文离开本机。
 
-## 路线图
+见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，其中有一条值得记住的宿主规则：工具与命令注册必须是被扫描的纯 TypeScript hooks 模块里的字面调用。
 
-- **M0–M5（已完成）：** 探针、provider 合同 + bridge、人机共用通道、彩色格档、降级与恢复、文档与打包。
-- **0.2（已完成）：** 文本 UI、HQ 图像档、接管模式、Linux 可移植性、模型易用性、安全打磨。见 [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md)。
-- **0.3（已完成）：** F1 真实像素捕获、F2 screencast 流式刷新、F3 iTerm2 与 tmux 内联 PNG、S1 点击导致的导航约束、C1 只读 `reader` provider、Q1 文档与门禁。iTerm2/tmux 的手工会话仍待验证。见 [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md)。
-- **下一步（0.4）：** 交互式第三方 provider、`target="_blank"` 处理、移动表面，以及内联 provider 的截图。
-- **更远：** 通过 `types` 合同分发第三方 provider；多 provider 焦点与资源配额。
+## 常见问题
 
-## 竞品位置
+<details>
+<summary>为什么按 <code>ctrl+g</code> 弹出的是编辑器而不是收起窗格？</summary>
 
-Transom 不是第一个会话内浏览器。[`zenbu-labs/terminal-browser`](https://github.com/zenbu-labs/terminal-browser)（MIT，约 4.5k★）已通过 `agent-browser` CLI 提供面板 + 模型动作；Claude Code 桌面版也内建 DOM 级 Browser pane。Transom 瞄准的是更窄的空位：
+`ctrl+g` 是 Claude Code 在 prompt 里的外置编辑器和弦。窗格只有持有键盘时才收得到。可靠的老板键是 `q`，它同时绑成普通键和 Button hotkey。
+</details>
 
-1. **Provider 无关的框架** —— 任何应用的能力协商、supervisor、白名单与审计，不只浏览器。
-2. **注册工具而非 shell CLI** —— 类型化输入输出、无 Bash 权限弹窗、可见区 token 预算。
-3. **人机同一条队列** —— 同一焦点、同一审计、同一个 `act()`。
-4. **远端与 tmux 一等公民** —— 文本档在任何终端可读，不依赖 kitty graphics。
+<details>
+<summary>阅读位置存在哪？</summary>
 
-逐条核对见 [`docs/COMPETITORS.md`](docs/COMPETITORS.md)。
+插件存储的 `moyu.progress.<文档哈希>`，位置一稳定就写。删除插件存储会重置。批注不持久化。
+</details>
 
-## 开放问题
+<details>
+<summary>它会改我的主题吗？</summary>
 
-1. Transom 面板与 tmux 分屏的边界在哪里？
-2. 对无官方 API 的目标（LINE/微信），重连与封号风险是否值得第一波做？
-3. 确认粒度：逐次太吵、全放行太险，按 provider 分级是否够？
-4. Raster + Client 合成层的帧率与坐标误差能否接受？
-5. provider 是否要成为可第三方分发的插件，还是在合同稳定前留在核心？
+默认不改。`auto` 什么都不设置，窗格用你的主题 key 绘制。预设是显式的，窗格收起时会清掉。
+</details>
 
-## 术语
+<details>
+<summary>能通过 SSH 在服务器上读同一个书库吗？</summary>
 
-- **Mod / function hooks：** 在 Claude Code 内运行的插件形态，可绘制会话 UI、接收输入、调用宿主能力。
-- **Provider：** 实现 `snapshot`/`act` 的外部应用适配器。
-- **快照：** 应用状态的结构化序列化，供模型与渲染共用。
-- **Ref：** 快照作用域内的节点地址；导航或新快照后失效。
+可以——窗格是终端文本，SSH 和 tmux 里都能用。书库必须在那台机器上。
+</details>
 
-## 参考
+## 参与贡献
 
-- 引擎类型与长文档：随 skill 生成在 `.../bundled-skills/<version>/plugin-authoring/`。
-- 骨架与手感参考：[manfye/cc-dino](https://github.com/manfye/cc-dino)（点击夺焦、`$.store`、33ms 帧、空间不足提示）、[tomas-schmieder/clawd-run](https://github.com/tomas-schmieder/clawd-run)（`prompt.edit` 空输入框判定、半格位图、类型契约、`NOTICE` 归属写法）。
-- 生态：[claude-mods-starter-kit](https://github.com/promptadvisers/claude-mods-starter-kit)（MIT）、[awesome-claude-code-mods](https://github.com/karanb192/awesome-claude-code-mods)、[mods.aidojo.si](https://mods.aidojo.si/)。
+欢迎 issue 与 PR。请先跑上面三项检查，并说明用哪个终端试过。参与即表示同意[行为准则](CODE_OF_CONDUCT.md)。
 
-## 许可
+## 许可证
 
-[MIT](LICENSE)。
+[MIT](LICENSE)。名字是个谐音梗，代码是普通 TypeScript。
 
-引擎与多数骨架为宽松许可（MIT/BSD-3）。若未来引入 Doom 一类 GPL-2.0 引擎，需单独目录放置并声明。
+致谢：Claude Code 功能钩子的作者，以及那些克制到让文本窗格成为正确形状的终端。

@@ -5,7 +5,7 @@ import type { ActContext, Action, ActResult, Capabilities, Provider, Snapshot } 
 import { Hub } from '../hub/hub'
 
 const CAPS: Capabilities = {
-  pointer: false, keys: false, scroll: false, images: false, text: true, navigation: false,
+  pointer: false, keys: false, scroll: false, text: true,
   minCols: 20, minRows: 5,
 }
 
@@ -57,12 +57,10 @@ function fakeOps(): Ops {
     after: () => ({ cancel: () => undefined }) as never,
     openPane: async () => ({ isPlaced: true }) as never,
     closePane: async () => undefined,
-    env: {
-      term: async () => undefined,
-      termProgram: async () => undefined,
-      wtSession: async () => undefined,
-      tmux: async () => undefined,
-    },
+    readText: async () => '',
+    listDir: async () => [],
+    statPath: async () => ({ kind: 'file', size: 0, mtimeMs: 0, isLink: false }),
+    fillPrompt: async () => undefined,
   }
 }
 
@@ -81,18 +79,12 @@ async function stubHub(): Promise<{ hub: Hub; stub: StubProvider; made: string[]
   return { hub, stub, made }
 }
 
-test('a text-only provider refuses pointer, keys, scroll and navigation', async () => {
+test('a provider without pointer, keys or scroll refuses those actions', async () => {
   const { hub } = await stubHub()
   const cases: Action[] = [
     { kind: 'click', ref: 'r1' },
-    { kind: 'clickAt', x: 1, y: 2 },
-    { kind: 'check', ref: 'r1' },
-    { kind: 'uncheck', ref: 'r1' },
-    { kind: 'hover', ref: 'r1' },
     { kind: 'press', key: 'Enter' },
     { kind: 'scroll', dx: 0, dy: 4 },
-    { kind: 'navigate', url: 'https://stub.test/next' },
-    { kind: 'back' },
   ]
   for (const action of cases) {
     const { result } = await hub.act(action, 'model')
@@ -112,12 +104,11 @@ test('snapshots still work and audit rows carry the provider id', async () => {
   expect(hub.audit.recent(1)[0]?.provider).toBe('stub')
 })
 
-test('image helpers degrade with a clear message', async () => {
+test('commands always reach the provider', async () => {
   const { hub } = await stubHub()
-  await expect(hub.screenshot(20, 5)).rejects.toThrow('no screenshots')
-  await expect(hub.raster(20, 5)).rejects.toThrow('no visual raster')
-  await expect(hub.frame(20, 5)).rejects.toThrow('no image capture')
-  expect(await hub.latestFrame(0)).toBeUndefined()
+  const { result } = await hub.act({ kind: 'command', name: 'page', args: { delta: 1 } }, 'model')
+  expect(result.ok).toBe(true)
+  expect(hub.audit.recent(1)[0]?.action).toContain('command page')
 })
 
 test('switching providers stops the previous one and clears the snapshot', async () => {

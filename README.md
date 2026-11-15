@@ -1,361 +1,326 @@
-# Transom
+# moyu 摸鱼
 
 **English** | [简体中文](README.zh-CN.md)
 
-> A side pane for any app inside a Claude Code session — visible to you, operable by you, callable by the model.
+> A novel reader that hides in plain sight inside a Claude Code session.
 
+[![CI](https://github.com/yekunsong/Moyu/actions/workflows/ci.yml/badge.svg)](https://github.com/yekunsong/Moyu/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.x-6f42c1)](https://code.claude.com)
 [![Status](https://img.shields.io/badge/status-early%20access-orange)](#status)
-[![Claude%20Code](https://img.shields.io/badge/Claude%20Code-2.1.319-6f42c1)](https://code.claude.com)
 
-```bash
-/plugin install transom --marketplace <owner>/<repo>
+moyu (摸鱼, “catching fish”) turns the side of a Claude Code session into a page of prose. It
+borrows **your** theme, draws like command output, and goes away with one key. The model reads
+the same page and can leave notes in the same style.
+
+No browser, no daemon, no network: a directory of text files, and a pane.
+
+```text
+novels/01-night-ferry.txt · 37%
+第一章 夜航
+
+渡口的灯在雾里只剩一团黄。阿桂把缆绳在手心绕了两圈，
+船身便轻轻贴住石阶。
+
+他数着岸上的脚步声，一遍又一遍。
+
+· AI 雾、玻璃和潮汐——三样让人看不清的东西。
+空格/j/k 翻页 · n/p 章节 · a 引用 · q 隐藏
+q 隐藏
 ```
-
-Transom collapses an external application into two interfaces — `snapshot()` to read structured state, `act()` to perform structured actions — and renders them in a session pane. People and the model share the same channel, every action is audited, and writes are gated by permissions.
-
-Moving the window into the terminal is a side effect. The product is **structured, addressable, auditable application state**.
 
 ---
 
-## Table of contents
+## Contents
 
-- [Why Transom](#why-transom)
+- [Why](#why)
 - [Features](#features)
-- [Status](#status)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Commands](#commands)
+- [Keyboard](#keyboard)
 - [Model tools](#model-tools)
-- [Pane controls](#pane-controls)
 - [Configuration](#configuration)
+- [The library](#the-library)
 - [Architecture](#architecture)
-- [Security](#security)
-- [Engine notes](#engine-notes)
-- [Rendering tiers](#rendering-tiers)
+- [Security and privacy](#security-and-privacy)
 - [Compatibility and limitations](#compatibility-and-limitations)
-- [Development](#development)
+- [Status](#status)
 - [Roadmap](#roadmap)
-- [Landscape](#landscape)
-- [Open questions](#open-questions)
-- [Glossary](#glossary)
-- [References](#references)
+- [Development](#development)
+- [FAQ](#faq)
+- [Contributing](#contributing)
 - [License](#license)
 
-## Why Transom
+## Why
 
-### Where it fits
+Reading at work means reading something that looks like work. A browser tab or a reader app is
+one alt-tab away from being noticed; a `less`-shaped pane inside the session is not.
 
-- **The terminal is the only entry point.** SSH boxes, containers, tmux. The Claude Code desktop app has a Browser pane with DOM and click tools, but it **cannot reach those machines** — the docs say SSH sessions do not get those tools.
-- **Sessions outlive connections.** A tmux/screen session survives network changes and machine switches. A desktop window does not.
-- **No graphical environment.** Servers, CI, containers without X. There is no browser window to open.
-- **The model needs registered actions, not screenshots.** Transom exposes `snapshot`/`act` as tools registered in the session — no Bash, no shell quoting, typed results, a token budget, available in any terminal.
-- **Review in place.** The transcript and the application live in one view: change, look, correct, without switching windows.
+moyu is built around three small ideas:
 
-### Where it deliberately does not fit
+1. **Camouflage.** By default it sets no theme at all. Prose inherits the session's own text
+   colour, chrome uses the dim variant, and headings carry no boxes. It reads as another block
+   of output.
+2. **A boss key.** `q` closes the pane instantly. A bare `/moyu` brings it back on the same
+   paragraph, or opens the last book if nothing is open.
+3. **A shared channel.** The model reads the same page through registered tools and can annotate
+   it. Press `a` on a paragraph to quote it into the prompt and ask.
 
-| Need | Use instead |
-|---|---|
-| Local development, typography, video, precise dragging, multi-tab browsing | Desktop Browser pane / a real browser |
-| Pure local coding with no UI | The CLI alone |
-| Pixel-perfect acceptance | The desktop app |
-
-**Transom is infrastructure for heavy remote users, not a desktop replacement.** The audience is small and the ceiling is low (cell resolution, 2–5 fps), but the "visible in-session + callable by the model" slice is still unclaimed in the way Transom claims it.
+It is deliberately small: text in, text out, progress on disk, nothing else.
 
 ## Features
 
-- **One channel for people and models.** The pane and `mcp__transom__*` tools feed the same serial action queue; every action records actor, target, policy, result and duration.
-- **Structured snapshots, not screenshots.** A stable-ref object graph with roles, accessible names, values, state and bounds. Refs carry a document generation, so navigation cannot silently rebind them; stale refs return `stale` instead of clicking the wrong thing.
-- **Provider framework, proven by a second adapter.** Capability negotiation, allowlists, the queue and auditing live in the hub; the browser is one adapter and the read-only `reader` is another. The hub imports no provider code and refuses actions a provider's capabilities lack.
-- **Permissioned by default.** http(s)-only navigation, host allowlist (`localhost` always), model writes confirmed per action (or `once`/`auto`), exact-label approval, fail-closed confirmations. A link click or `clickAt` preflights its destination before the click, and a page-script navigation to an unlisted host raises an audited `escaped` warning with **back** and **allow host**.
-- **Audited.** Human and model actions land in the same ring buffer and in `$.store`; fill text is redacted.
-- **Three rendering tiers.** Text (buttons, inputs and sections, any terminal), colored cells (half-block Raster, 24-bit color) and HQ images (real PNG frames on kitty, Ghostty, WezTerm and iTerm2 3.5+, and inside tmux via passthrough). Degrades to a summary line in narrow panes.
-- **Inline editing and structure.** Text fields and selects edit in place; rows group under page headings with a status bar and block navigation.
-- **Crash-isolated and portable.** A supervised local bridge owns headless Chromium; health checks, backoff restarts, idle shutdown, process-tree cleanup, Linux/macOS discovery and WSL-verified tests.
-- **Attach mode.** `/transom attach <port>` mirrors a Chrome you already run, with its logins, and detaches without closing it.
-- **Browser-free reading.** `/transom reader <url>` fetches a page over `ops.fetch` and shows headings, links, paragraphs and lists as text. It is text-only, runs no JavaScript, keeps no cookies and cannot log in; pointer, keys, scroll, image and field actions are refused with the missing capability.
-- **Model ergonomics.** Delta snapshots, `browser_find`, `browser_wait`, and automatic dialog handling (alerts accepted; confirms/prompts dismissed).
-- **Untrusted page content is treated as data.** Snapshots start with an explicit banner; page strings are control-character-stripped before dialogs; clicks hit-test `elementFromPoint` and report covered targets.
-
-## Status
-
-0.3 in progress (the package still reports 0.2.0 until the release); early access. The Claude Code function-hooks API is early access and may change between releases. Milestones M0–M5 and every 0.2 phase (text UI, HQ image tier, attach mode, Linux, model ergonomics, safety polish) are complete. The 0.3 phases are implemented — real-pixel capture (F1), screencast streaming (F2), inline PNG for iTerm2/tmux (F3), click containment (S1), the read-only provider (C1), and docs plus gates (Q1) — with manual iTerm2/tmux sessions still pending; see [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md), [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md) and [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md) for the design, deviations and verified findings.
+- **Plain-text page.** Paragraphs and chapter headings, viewport-sized paging, a dim path and
+  percentage header. No reader chrome.
+- **Palette inheritance.** `theme: "auto"` (default) never calls `$.theme.set`; the pane follows
+  the person's own terminal and Claude Code theme. `mono`, `paper` and `ink` are opt-in presets.
+- **Boss key.** `q`, Escape, `/moyu` (no argument) or `/moyu hide`. Opening requests focus,
+  Escape closes, and the pane body is transparent.
+- **Resume.** Chapter and offset persist per file under `moyu.progress.<hash>`. A bare `/moyu`
+  reopens the last book at the saved page, so hiding never costs your place.
+- **Library guard.** Only `.txt`, `.md` and `.text` regular files under the resolved library root;
+  symlinks are judged by their real path.
+- **Directory shelf.** Opening a directory lists readable files; a recent list fills the empty
+  pane.
+- **Shared annotations.** `mcp__moyu__annotate` attaches a note to a paragraph ref. Notes render
+  italic in the prose colour, prefixed `· AI`, right after the anchor.
+- **Ask about ¶.** Click a paragraph, then `a` or the footer button to quote it into the prompt
+  through `$.prompt.fill` — never auto-submitted.
+- **Auto-hide.** `autoHideSeconds` hides the pane after quiet time; any key re-arms it.
+- **Audited.** Person and model actions share one serial queue and one audit ring.
 
 ## Requirements
 
-- Claude Code 2.1.x with function hooks (`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`), in an **interactive terminal**.
-- Node.js 20+ (22 recommended).
-- A local Chrome, Chromium or Edge — or set `TRANSOM_CHROME` to an executable path.
+- Claude Code 2.1.x with function hooks (`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`), in an
+  **interactive terminal**.
+- Node.js 22+.
+- A library directory containing UTF-8 `.txt`, `.md` or `.text` files.
+
+No Chrome, no extra process, no API key of its own.
 
 ## Installation
 
-From a terminal session:
+From a session:
 
-```bash
-/plugin install transom --marketplace <owner>/<repo>
+```text
+/plugin install moyu --marketplace yekunsong/Moyu
 ```
 
-Develop from a folder:
+From a checkout, for development:
 
 ```bash
+git clone https://github.com/yekunsong/Moyu.git
+cd Moyu
 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
-  claude --plugin-dir D:/Study/transom
+  claude --plugin-dir "$PWD"
 ```
 
-`CLAUDE_CODE_NO_FLICKER=1` enables the fullscreen layout: the pane docks to the right and **mouse clicks reach the buttons**. Without it the pane renders inline above the prompt, where mouse events do not reach it — use `ctrl+x tab` to give the pane the keyboard, then Tab/Enter.
-
-> Official docs say function hooks are interactive-only. On 2.1.319, `claude -p` also loads plugin tools (`--allowedTools mcp__transom__…` works headlessly), but that is early-access behaviour and is not guaranteed.
+`CLAUDE_CODE_NO_FLICKER=1` enables the fullscreen layout: the pane docks right and the pointer
+reaches it. Inline panes stay keyboard-only — `ctrl+x tab` gives them the keyboard, Escape
+returns it.
 
 ## Quick start
 
-```text
-/transom demo          # start a local fixture and open it in the pane
+```bash
+mkdir -p novels
+cp fixtures/novel/* novels/
 ```
 
-Click **Increase count** in the pane. Then ask the model:
+```text
+/moyu 01-night-ferry.txt
+```
 
-> Call `mcp__transom__browser_snapshot`, then use `browser_act` to click the button named "Increase count", then snapshot again and report the counter.
+Read with `↓`/`↑`, `space`/`b`, `j`/`k`, or the mouse. Click a paragraph to select it, `a` to put
+it in the prompt. `q` hides the pane; `/moyu` comes back to the same page.
 
-The model's write is confirmed before it runs. `/transom audit` shows both actions, attributed to `person` and `model`.
+Ask the model:
+
+> Call `mcp__moyu__read`, then `mcp__moyu__annotate` on the second paragraph with a one-line note,
+> then read the page again.
+
+The note appears under the paragraph in the prose style.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `/transom` | Open the pane |
-| `/transom open <url>` | Open the pane and navigate (localhost/127.0.0.1 and configured hosts by default) |
-| `/transom reader <url>` | Read a page as text in the browser-free, read-only provider (http/https only) |
-| `/transom demo` | Start the local fixture (counter, form, list, canvas, shadow DOM, iframe, long scroller) and open it |
-| `/transom attach <port>` | Attach to a Chrome already running with `--remote-debugging-port=<port>`; `/transom close` detaches without closing it |
-| `/transom allow <host\|url>` | Allow a host for this session (exact or `*.` wildcard); outranks the configured allowlist and is audited |
-| `/transom deny <host\|url>` | Deny a host for this session; wins over both the allowlist and a session allow, and is audited |
-| `/transom audit` | Show the last 20 audit entries |
-| `/transom close` | Close the pane and stop the browser (in attach mode: detach only) |
+| `/moyu` | Toggle the pane (boss key). With nothing open, resumes the last book |
+| `/moyu <path>` | Open a file, or a directory as a shelf, under the library root |
+| `/moyu hide` / `/moyu show` | Hide or show explicitly |
+| `/moyu theme <auto\|mono\|paper\|ink>` | Follow your own palette (default) or set a preset |
+| `/moyu close` | Drop the book and close the pane |
 
-The reader uses the same host allowlist, queue and audit as the browser, but never starts Chrome. It does not execute JavaScript, follow logins or render images; use `/transom open` when a page needs them.
+`/moyu show` with nothing open reopens the last book at its saved page; if the recent list is
+empty it shows the shelf.
 
-Session grants are the person's live word: `/transom allow` and `/transom deny` accept a hostname or a full URL, apply for the rest of the session only, and are recorded in the audit as `person allow <host>` / `person deny <host>`. A deny always wins, including over `localhost` and over a session allow; run the opposite command to reverse an earlier grant.
+## Keyboard
 
-### Attach to a browser you started
+The pane is less-shaped.
 
-Transom can mirror and control an existing Chrome instead of launching its own. Start Chrome with a debugging port — the flag only applies to a new process, so quit Chrome first — then attach:
+| Key | Action |
+|---|---|
+| `↑` `↓` `←` `→`, `space` `b`, `j` `k` | Turn pages |
+| `n` / `p` | Next / previous chapter |
+| `g` / `G`, `home` / `end` | Start / end of chapter |
+| Click | Select a paragraph |
+| `a` | Quote the selected paragraph into the prompt |
+| `q`, `Escape` | Hide the pane at once |
+| `ctrl+g` | Hide while the pane holds the keys |
 
-```text
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir=%TEMP%\transom-chrome
-/transom attach 9222
-```
-
-The pane connects to the first tab (preferring an http/https page) and drives it in place; `/transom close` detaches and leaves Chrome running. Pass your normal profile directory instead of the temporary one if you want the browser's existing cookies and logins — attach mode inherits that state. See [`docs/SECURITY.md`](docs/SECURITY.md).
+`q` is both a Client key and a Button hotkey, so it works after `ctrl+x tab` or `closeOnEscape`
+without the pointer. `ctrl+g` is the host's external-editor chord in the Chat context; the pane
+consumes it only while focused, which is why `q` is the boss key.
 
 ## Model tools
 
-| Tool | Access | Purpose |
-|---|---|---|
-| `mcp__transom__browser_open` | write (navigation) | Open the pane and navigate; unlisted hosts require confirmation |
-| `mcp__transom__browser_snapshot` | read | Structured page snapshot; `sinceLast: true` returns only added/removed/changed refs |
-| `mcp__transom__browser_find` | read | Filter the current snapshot by text, role or interactivity without re-reading the page |
-| `mcp__transom__browser_wait` | read | Wait for a CSS selector, body text or network idle; a timeout is a normal result |
-| `mcp__transom__browser_act` | read/write | `click`, `check`, `uncheck`, `clickAt` (viewport px), `fill`, `select`, `press`, `scroll`, `hover`, `focus`, `navigate`, `back`, `forward`, `reload` |
-| `mcp__transom__browser_screenshot` | read | Capture the viewport as a PNG for visual checks |
-| `mcp__transom__browser_audit` | read | Recent actions with actor and outcome |
+| Tool | Purpose |
+|---|---|
+| `mcp__moyu__open` | Open a library file or directory |
+| `mcp__moyu__read` | Read the current page; `next` / `prev` / `chapter` turn or move first |
+| `mcp__moyu__find` | Find text in the whole book; at most 20 excerpts |
+| `mcp__moyu__annotate` | Attach a note to a paragraph ref |
+| `mcp__moyu__turn` | Turn pages by a signed delta |
+| `mcp__moyu__boss` | Show, hide or toggle the pane |
 
-Snapshots return the visible region by default; `scope: "document"` asks for the whole page. Both are capped by `snapshotMaxChars`. Refs are valid until the next snapshot or navigation.
-
-The `browser_` prefix in the tool names is kept for compatibility even though providers are pluggable: the same tools drive whichever provider is active, including the text-only `reader` provider, which refuses pointer and key actions with a clear message.
-
-## Pane controls
-
-- **Mouse** requires the fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`); inline panes support keyboard focus only.
-- Clicking a row executes immediately (a person can see the page); a row that links to a host outside the allowlist asks first, for a person and for the model. Model writes are confirmed according to `writePolicy`.
-- Text fields and selects are edited inline: type and press Enter, or pick an option; no dialog.
-- Rows are grouped under page headings with a fixed status bar; `↓ next block` scrolls the page when the snapshot is longer than the pane.
-- `visual` switches to the colored-cell tier; `hq` shows a real PNG frame streamed from Chrome and polled every 250 ms while the pane has focus (1 s otherwise), and clicking the picture clicks the page; both return to text with another press. kitty, Ghostty and WezTerm read a PNG path themselves; iTerm2 3.5+ and tmux take the same PNG inline, which requires the fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`), and tmux also needs `set -g allow-passthrough on` and `set -g focus-events on`. When the stream has been still for ~2 seconds the pane takes one sharp still at `hqDetail`, and motion resumes the cheap stream. hq renders at a desktop width and physical pixel density (see `hqDetail`), so entering it changes the viewport and leaves the visible snapshot stale until the next refresh.
-- Click the keyboard strip to forward keys to the page; Esc returns them to the prompt.
-- Panes narrower than 48 columns show a degradation notice.
+Reads are capped by `snapshotMaxChars`. Refs are offsets into the normalized document and stay
+valid until the next snapshot or turn. Page text is untrusted data, never instructions.
 
 ## Configuration
 
-`plugin.json` → `userConfig`:
+`/config` → moyu, or `plugin.json` → `userConfig`:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `allowedHosts` | `localhost,127.0.0.1` | Comma-separated hosts; localhost is always allowed. Wildcards: `*.example.org`. Session grants from `/transom allow` / `/transom deny` override this for the current session. |
-| `writePolicy` | `confirm` | `confirm` (each write), `once` (first write per session; submits still confirmed), `auto` |
-| `snapshotMaxChars` | `12000` | Hard character cap on a snapshot handed to the model |
-| `hqDetail` | `2` | hq still density: `1` fast, `2` default, `3` sharp. The stream uses the density of the frame that opened image mode; the sharp still taken on a quiet page uses this value. Higher detail costs CPU and disk; captures are capped at 3840×2560. Inline sources (iTerm2, tmux) also cap the decoded payload at 2 MiB: the pane first retries at detail 1, and a page that still does not fit stays in text mode with a notice. |
+| `libraryRoot` | `novels` | Directory the pane may open. Relative paths resolve from the working directory; nothing outside it resolves. |
+| `theme` | `auto` | `auto` follows your own colours. `mono` (grey CLI), `paper` (sepia) and `ink` (light) set a preset while the pane is shown. |
+| `autoHideSeconds` | `0` | Hide after this many idle seconds; `0` keeps it open. |
+| `snapshotMaxChars` | `12000` | Hard character cap on one `read`. |
+
+## The library
+
+- Root default `novels/`, relative to the session working directory, or an absolute path.
+- Accepted: regular `.txt`, `.md`, `.text`. Case-insensitive extensions; UTF-8 text.
+- Resolved real paths must stay inside the root; `..` that escapes is refused, so is a file
+  outside it even when given by absolute path.
+- Chapters split on `第N章/回/节/卷`, `CHAPTER N`, `#`-headings and `1.` / `1)` lines. A document
+  with none is one chapter; a first line of 60 characters or fewer becomes the title.
+- CRLF and BOM are normalized, tabs kept, other control characters dropped. Paragraphs are
+  capped at 2,000 characters.
+
+See [`docs/NOVEL.md`](docs/NOVEL.md) for the full design and [`docs/PROVIDERS.md`](docs/PROVIDERS.md)
+for the adapter contract.
 
 ## Architecture
 
-Dependencies point inward; only the hooks module touches the engine API.
-
 ```text
-hooks/main.tsx          registration, commands, pane, Ops literal
-hooks/tools.ts          five model tools and output projection
-engine/ops.ts           narrow interface over $
-engine/adapter.ts       fetchJson / ask / store helpers
-engine/supervisor.ts    bridge process, handshake, health, backoff, stop
-hub/hub.ts              serial action queue, view model, audit wiring
-hub/permissions.ts      scheme/host allowlists, action classification
-hub/audit.ts            ring buffer + $.store persistence
-hub/negotiate.ts        capability negotiation and degradation
-providers/browser/      provider contract, HTTP client, pane rows/keys
-bridge/                 localhost HTTP + CDP + injected page agent
-demo/                   fixture app and static server
-tests/                  plugin tests, supervisor unit tests, bridge E2E
+hooks/entry.ts        the one hooks module: captures, tools, command, pane
+hooks/main.tsx        pane rendering, key routing, Ops literal
+hooks/boss.ts         visibility, theme presets, idle hide
+hooks/tools.ts        tool schemas and handlers
+hub/hub.ts            serial action queue, capability gate, view model
+hub/audit.ts          ring buffer + $.store persistence
+engine/provider.ts    the provider contract
+engine/ops.ts         the narrow slice of $ adapters get
+providers/novel/      library guard, parser, pager, provider, key strip
+tests/                plugin suite against an in-memory library
 ```
 
-### Provider contract
+Dependencies point inward. Only `hooks/` touches `$`; only `providers/` touch the outside world —
+here, a directory. The hub is provider-agnostic and gates actions by declared capabilities before
+anything runs.
 
-```ts
-type Provider = {
-  readonly meta: {
-    id: string
-    label: string
-    capabilities: {
-      pointer: boolean; keys: boolean; scroll: boolean; images: boolean
-      text: boolean; minCols: number; minRows: number
-    }
-    allowSchemes: string[]
-    defaultWidth: number
-  }
-  start(): Promise<void>
-  stop(): Promise<void>
-  health(): Promise<{ ok: boolean; url?: string; title?: string; error?: string | null }>
-  snapshot(request: { scope: 'viewport' | 'document'; maxChars: number; cols: number; rows: number }): Promise<Snapshot>
-  act(action: Action, context: { actor: 'person' | 'model' }): Promise<ActResult>
-  screenshot?(cols: number, rows: number): Promise<{ pngBase64: string }>
-  raster?(cols: number, rows: number): Promise<{ cells: string; columns: number; rows: number }>
-}
-```
+A provider implements `open` / `snapshot` / `act`; `snapshot` returns role-tagged nodes with
+character-offset refs, `act` accepts `click`, `press`, `scroll` and provider `command`s. A future
+game adapter is the reason the contract is kept.
 
-Reusable refs must come from the application's own object identity, not coordinates or indices. When a ref is no longer valid, the provider reports `stale`; it must never silently act on a different element. See [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
+## Security and privacy
 
-### Key mechanisms
-
-- **Capability negotiation:** narrow panes and terminals without pointer/key support degrade to text or a summary line.
-- **Supervisor:** one bridge per provider, handshake, health polling, exponential backoff, idle shutdown, process-tree cleanup.
-- **Shared queue:** permission decision, confirmation and execution run as one critical section; a stale page cannot slip between "Allow" and the action.
-- **Context policy:** visible region plus landmark summary; the whole page is opt-in and always capped.
-- **Fail-closed:** only the exact `Allow` labels approve; free text or a dismissed dialog denies.
-
-## Security
-
-See [`docs/SECURITY.md`](docs/SECURITY.md). In short: the bridge is a loopback HTTP service guarded by a per-start random bearer token and rejects browser `Origin`; Chrome runs with a throwaway profile (attach mode instead uses the browser you started); navigation is http(s)-only and host-allowlisted; password values are masked; page text is untrusted data, never instructions; every action is audited.
-
-Links and `clickAt` are preflighted: a click whose destination is off-list is confirmed before it runs, even under `once`/`auto`, and a denied scheme or host never clicks. A navigation the page performs by itself — a script redirect, or a form submit caused by `press Enter` — cannot be preflighted; the hub compares the host after the action, audits it as `escaped`, and shows a warning with **back** and **allow host**.
-
-## Engine notes
-
-Measured on Claude Code 2.1.319, local, interactive terminal.
-
-### Available
-
-| Capability | API |
-|---|---|
-| Side pane | `$.ui.open({ id, title, columns })`; docks at ≥110 columns once asked (144 unasked) |
-| Rendering | `Client` tree, `Raster` (u32 `[codePoint, fg, bg]` per cell), `Image`, `Svg`, `Markdown`, `Code` |
-| Frame clock | `surface.every(ms, fn)`; redraw ≤10/s (30/s for a shown terminal pane); `$.ui.blit` up to ~60/s |
-| Pointer | `surface.onPointer` with `down/move/up/enter/leave`; sub-cell `fine.x/y` on kitty, Ghostty, iTerm2, WezTerm, foot |
-| Keyboard | `surface.onKey` after click focus; Esc always returns the keys |
-| Sizes | `Client` width/height accept percentages; `surface.columns/rows` are measured cells |
-| Surfaces | One tree, per-surface via `e.surface`: terminal/desktop/vscode/mobile |
-| Processes | `$.process.spawn` (stdout stream, one-shot stdin), `$.process.run` |
-| Network / files | `$.http.fetch`, `$.mcp.connect`; `$.fs` reads ≤4 MiB |
-| Model interface | `$.tool.register`, `$.session.append`, `$.ui.ask` |
-| State | `$.state` (session) / `$.store` (cross-session) with typed contracts |
-
-### Hard constraints
-
-1. **`spawn` stdin is one-shot and there is no PTY.** Interactive programs need a control port (CDP / JSON-RPC / socket) or a single-process design.
-2. **`Client` cannot embed `Raster`/`Image`.** High frame rate and pointer input require a composite layer: Raster for pixels, a thin Client for pointer events.
-3. Three consecutive `setState` calls with no event trip the render-loop detector and unmount the instance.
-4. A tree is capped at 20k nodes / 100k characters; a Raster at 512×256.
-5. Terminals report no key-up; tmux does not forward sub-cell `fine` coordinates.
-6. Mouse input works only in the fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`).
-7. `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` is required. Officially interactive-only; 2.1.319 also loads tools under `-p` (see [Installation](#installation)).
-8. Early access: interfaces move between releases.
-
-## Rendering tiers
-
-| Tier | Content | Cost | Status |
-|---|---|---|---|
-| Text | Text, links, form structure, colored | Low | Shipped |
-| Colored cells | Raster downscale, 24-bit color, clickable by row | Medium | Shipped (`visual`) |
-| Images (HQ) | `Image` with a PNG file source (kitty, Ghostty, WezTerm) or inline PNG bytes (iTerm2 3.5+, tmux) | Medium | Shipped (`hq`), streamed |
-
-The color is real 24-bit foreground/background, not monochrome. Cells are still an image, not the thing itself: small type blurs and rounded shadows disappear. HQ frames are captured at 1–3× density and can be 1–4 MB each.
+Everything is local. Reads are confined to the resolved root, extensions and real paths are
+checked, and text is treated as data. The pane fills the prompt but never submits it. There is no
+telemetry. See [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Compatibility and limitations
 
-- **Terminals:** kitty, Ghostty, iTerm2, WezTerm and foot get the full feature set; Windows Terminal and GNOME degrade; tmux loses sub-cell precision.
-- **Platforms:** Windows, Linux and macOS browser discovery; the bridge suite is verified in WSL Ubuntu (Node 22, chrome-headless-shell).
-- **Interactive only:** desktop app, mobile and headless sessions do not draw the pane.
-- **Headless Chrome only:** no logged-in profile by default; no extensions, no audio, no tabs.
-- **No JS-rendered canvas semantics:** canvas content participates as an image, not as nodes.
-- **Raster is manual:** `visual` repaints on demand; `hq` streams via Chrome's screencast (250 ms poll while focused, 1 s otherwise) and takes one sharp still when the page is idle.
-- **HQ terminals:** `hq` needs a terminal that reads a PNG path itself (kitty, Ghostty, WezTerm) or takes inline PNG bytes (iTerm2 3.5+, tmux with `allow-passthrough` and `focus-events`). Inline rendering requires the fullscreen layout and tmux additionally needs those two options set; Windows Terminal stays on the text tier.
-- **Inline payload cap:** inline sources keep the decoded PNG under 2 MiB. The pane retries at detail 1, and a page that still does not fit stays in text mode with a notice.
-- **Escaped navigation is a backstop:** link clicks and `clickAt` are preflighted before they run, but a script redirect or a form submit (`press Enter`) can still land on another host. The hub audits it as `escaped` and shows **back** / **allow host**; under `auto` this is not prevention.
-- **Dialogs:** `alert` is accepted, `confirm`/`prompt` are dismissed so a page never blocks; the dialog is recorded in `/health` and the action message.
+- **Terminals:** any terminal that can draw a pane; no graphics protocol needed.
+- **Platforms:** Windows, Linux and macOS. Windows and POSIX path shapes are both folded.
+- **Interactive only:** headless `-p` runs load the tools but do not draw the pane.
+- **Text only:** no EPUB/PDF, no network novels, no images, no fonts or spacing controls, no
+  non-UTF-8 encodings.
+- **Annotations are in memory** and clear when the file is reopened; progress does not.
+- **Small panes** work but get very short pages; the pane itself compiles down to 20 columns.
+- Early access: the function-hooks API changes between Claude Code releases.
+
+## Status
+
+0.4, early access. 0.1–0.3 were the browser line; 0.4 replaces it with the reader while keeping
+the contract, queue, gate, audit and supervisor for later adapters. Version numbers may move
+quickly until the hooks API settles.
+
+## Roadmap
+
+- Hardening: more parser edge cases, a note toggle, per-file bookmarks.
+- A game adapter on the trimmed contract.
+- Optional third-party providers via the contract.
+
+Not planned: network novels, EPUB, images in prose, multi-pane focus.
 
 ## Development
 
 ```bash
-npm test          # typecheck + plugin validate + plugin tests + bridge E2E
 npm run typecheck
 npm run validate
 npm run test:plugin
-npm run test:bridge
+npm test                 # all three
 ```
 
-- `tests/bridge/bridge.test.mjs` starts a demo server and real headless Chrome: snapshots, clicks, fills, shadow DOM, frames, raster, stale refs, covered targets, password masking.
-- `tests/*.test.ts` run in the engine test kit against an in-memory fake bridge: permissions, audit, rendering, degradation, restart races.
-- Commit messages follow Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`), imperative, English. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The suite covers the parser, pager, guard, provider, hub, pane and tools against an in-memory
+library; CI runs it on Linux with Node 22. No novel text leaves the machine.
 
-## Roadmap
+See [`CONTRIBUTING.md`](CONTRIBUTING.md), including the one host rule worth knowing: tool and
+command registration must be literal calls in the plain-TypeScript hooks module.
 
-- **M0–M5 (done):** probe, provider contract + bridge, shared human/model channel, colored-cell tier, degradation and recovery, docs and packaging.
-- **0.2 (done):** text UI, HQ image tier, attach mode, Linux portability, model ergonomics, safety polish. See [`docs/ROADMAP-0.2.md`](docs/ROADMAP-0.2.md).
-- **0.3 (done):** F1 real-pixel capture, F2 screencast streaming, F3 inline PNG for iTerm2 and tmux, S1 click-driven navigation containment, C1 read-only `reader` provider, Q1 docs and gates. Manual iTerm2/tmux sessions are still pending. See [`docs/ROADMAP-0.3.md`](docs/ROADMAP-0.3.md).
-- **Next (0.4):** interactive third-party providers, `target="_blank"` handling, mobile surfaces, and screenshots with inline providers.
-- **Later:** third-party provider distribution via the `types` contract; multi-provider focus and resource quotas.
+## FAQ
 
-## Landscape
+<details>
+<summary>Why did <code>ctrl+g</code> open an editor instead of hiding the pane?</summary>
 
-Transom is not the first in-session browser. [`zenbu-labs/terminal-browser`](https://github.com/zenbu-labs/terminal-browser) (MIT, ~4.5k★) ships a pane + model actions through the `agent-browser` CLI; the Claude Code desktop app ships a DOM-level Browser pane. The gap Transom aims at is narrower:
+`ctrl+g` is Claude Code's own external-editor chord in the prompt. The pane only receives it
+while it holds the keyboard. `q` is the reliable boss key and is bound both as a plain key and as
+a Button hotkey.
+</details>
 
-1. **Provider-agnostic framework** — capability negotiation, supervisor, allowlists and audit for any app, not just a browser.
-2. **Registered tools, not a shell CLI** — typed inputs/outputs, no Bash permission prompt, visible-region token budget.
-3. **One queue for people and models** — same focus, same audit, same `act()`.
-4. **Remote and tmux as first-class** — text tier on any terminal, no kitty-graphics dependency.
+<details>
+<summary>Where is my place stored?</summary>
 
-Full verified table: [`docs/COMPETITORS.md`](docs/COMPETITORS.md).
+In the plugin store under `moyu.progress.<document hash>`, written whenever the position settles.
+Deleting the plugin store resets it. Annotations are not persisted.
+</details>
 
-## Open questions
+<details>
+<summary>Does it change my theme?</summary>
 
-1. Where is the boundary between Transom panes and tmux splits?
-2. For targets without an official API (LINE/WeChat), do reconnect and ban risks justify a first-wave provider?
-3. Confirmation granularity: per action is noisy, blanket approval is risky — is per-provider policy enough?
-4. Can the Raster + Client composite hit acceptable frame rate and coordinate error?
-5. Should providers become third-party distributable plugins, or stay in core until the contract settles?
+Not by default. `auto` sets nothing; the pane paints with your theme keys. Presets are explicit
+and are cleared again when the pane hides.
+</details>
 
-## Glossary
+<details>
+<summary>Can I read the same library on a server over SSH?</summary>
 
-- **Mod / function hooks:** the Claude Code plugin form that draws session UI, receives input and calls host capabilities.
-- **Provider:** an adapter for an external application implementing `snapshot`/`act`.
-- **Snapshot:** a structured serialization of application state shared by the model and the renderer.
-- **Ref:** a snapshot-scoped address for a node; invalidated by navigation or a newer snapshot.
+Yes — the pane is text on the terminal, so it works in an SSH session and inside tmux. The
+library must exist on that machine.
+</details>
 
-## References
+## Contributing
 
-- Engine types and long-form docs: generated under `.../bundled-skills/<version>/plugin-authoring/` beside the skill.
-- Skeleton and feel references: [manfye/cc-dino](https://github.com/manfye/cc-dino) (click focus, `$.store`, 33 ms frames, out-of-room notices), [tomas-schmieder/clawd-run](https://github.com/tomas-schmieder/clawd-run) (`prompt.edit` empty-composer check, half-block bitmaps, type contracts, `NOTICE` attribution).
-- Ecosystem: [claude-mods-starter-kit](https://github.com/promptadvisers/claude-mods-starter-kit) (MIT), [awesome-claude-code-mods](https://github.com/karanb192/awesome-claude-code-mods), [mods.aidojo.si](https://mods.aidojo.si/).
+Issues and pull requests are welcome. Please run the three checks above and say which terminal
+you tried. By participating you agree to the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). The name is a pun; the code is ordinary TypeScript.
 
-The engine and most skeletons are permissively licensed (MIT/BSD-3). If a GPL-2.0 engine such as Doom is ever bundled, it must live in a separate directory with its own notice.
+Acknowledgements: the Claude Code function-hooks authors, and the terminals whose restraint made
+a text pane the right shape.

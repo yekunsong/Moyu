@@ -1,78 +1,80 @@
-# Contributing to Transom
+# Contributing to moyu
 
-Thanks for helping. This project is an early-access Claude Code function-hooks mod; the engine API moves between releases, so small, well-described changes are easier to review than broad rewrites.
+Thanks for helping. moyu is an early-access Claude Code function-hooks mod: the engine API moves
+between releases, so small, well-described changes are easier to review than broad rewrites.
 
-## Development setup
+## Setup
 
-Requirements: Node.js 20+ and a local Chrome/Chromium/Edge (or `TRANSOM_CHROME`).
+Requirements: Node.js 22+, the Claude Code CLI 2.1.x and an interactive terminal.
 
 ```bash
-git clone <repo>
-cd transom
-npm test
+git clone https://github.com/yekunsong/Moyu.git
+cd Moyu
+npm install --global @anthropic-ai/claude-code@2.1.322   # if not already installed
 ```
 
 `npm test` runs, in order:
 
-1. `tsc --noEmit` (TypeScript 5.9 via `npx`)
+1. `tsc --noEmit`
 2. `claude plugin validate .`
-3. `claude plugin test .` — plugin tests against an in-memory fake bridge
-4. `npm run test:bridge` — real headless Chrome against the demo app, plus the browser-free portability checks
+3. `claude plugin test .` — the plugin suite against an in-memory library
 
-Run a single suite with `npm run test:plugin` or `npm run test:bridge`.
+Run one step with `npm run typecheck`, `npm run validate` or `npm run test:plugin`.
 
 ## Trying it in a session
 
 ```bash
+mkdir -p novels
+cp fixtures/novel/* novels/
 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CLAUDE_CODE_NO_FLICKER=1 \
   claude --plugin-dir "$PWD"
 ```
 
-Then `/transom demo`. The fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`) is required for mouse clicks; inline panes are keyboard-only.
+Then `/moyu 01-night-ferry.txt`. `q` hides the pane. The fullscreen layout
+(`CLAUDE_CODE_NO_FLICKER=1`) is required for mouse interaction; inline panes are keyboard-only
+(`ctrl+x tab` gives them the keyboard).
+
+## Where things live
+
+```text
+hooks/entry.ts       the one hooks module; tool and command registration
+hooks/main.tsx       commands, pane, Ops literal
+hooks/boss.ts        visibility, presets, idle hide
+hooks/tools.ts       tool specs and tool.call handlers
+hub/                 serial queue, view model, audit
+providers/novel/     guard, parser, pager, provider, key strip
+```
+
+The host scans `hooks/entry.ts` for the `$` calls a module makes. `$.tool.register` and
+`$.command.register` must be literal calls in that plain `.ts` file; `.tsx` files are not
+scanned, so keep engine calls in hooks modules and pure logic elsewhere.
+
+## Tests
+
+- Tests import `claude plugin test`'s kit. The plugin is loaded by the harness: configure it with
+  `test(name, { options }, body)` instead of calling `register` again.
+- Fake files live in `tests/helpers.ts`. Use POSIX absolute paths (`/lib`), not `C:/…`, or the
+  Linux runner treats them as relative.
+- `$.prompt.fill` is answered directly with `{ isFilled: true }`; `session.start` is answered by
+  the bottom hook.
+- Cover the happy path and one refusal (outside the root, wrong extension, empty input).
 
 ## Commit messages
 
-All commits are in **English**, following [Conventional Commits](https://www.conventionalcommits.org/):
+English, imperative, [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```text
-<type>(<scope>): <imperative summary>
+<type>(<scope>): <summary>
 
-<optional body: why, not what>
+<body: why, not what>
 
-Co-Authored-By: ...
+Co-Authored-By: …
 ```
 
-- **type**: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`, `revert`.
-- **scope** (optional): `bridge`, `hub`, `engine`, `provider`, `pane`, `tools`, `docs`, `tests`.
-- Summary in the imperative mood (`add`, `fix`, `document`), lowercase, no trailing period, at most 72 characters.
-- Keep the subject line free of CJK characters; the repository is English-first.
-- Body wraps at 72 columns and explains motivation and trade-offs.
-- One logical change per commit; tests and docs for the change travel with it.
-
-Examples:
-
-```text
-feat(bridge): add a /raster endpoint returning half-block cells
-fix(hub): fail closed when a confirmation returns free text
-docs: translate the repository to English and add a zh-CN README
-```
+Scopes in use: `novel`, `pane`, `boss`, `hub`, `engine`, `tools`, `tests`, `docs`.
 
 ## Pull requests
 
-- Describe the problem, the change and how it was verified.
-- Include the commands you ran (`npm test`, manual session checks).
-- Note engine-version assumptions: function hooks are early access; state the Claude Code version you tested (currently 2.1.319).
-- New providers: read [`docs/PROVIDERS.md`](docs/PROVIDERS.md) and include protocol-level tests.
-- Security-sensitive changes: read [`docs/SECURITY.md`](docs/SECURITY.md) and run the release checklist.
-
-## Code style
-
-- TypeScript with `strict` and `noUncheckedIndexedAccess`; no `any` unless narrowing an engine boundary.
-- The plugin modules run with no Node, DOM, network or `process` — everything goes through `Ops` (`engine/ops.ts`).
-- Verify plugin behavior with `claude plugin test`; verify the bridge with `node --test`.
-- Never pass `$` across modules: `claude plugin validate` rejects it. Build an `Ops` literal at the hook call site.
-- Keep engine calls inside `engine/` and `hooks/`; providers and the hub stay host-agnostic.
-
-## License
-
-By contributing you agree that your contributions are licensed under the [MIT License](LICENSE).
+- One concern per PR; say what you tried and in which terminal.
+- Update `docs/NOVEL.md` for behaviour changes and `CHANGELOG.md` under `Unreleased`.
+- Keep the pane text-only. A feature that needs a process or the network should say so in the PR.

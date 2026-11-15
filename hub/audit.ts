@@ -15,7 +15,7 @@ export type AuditEntry = {
 }
 
 const MEMORY_LIMIT = 500
-const STORE_KEY = 'audit.v1'
+const STORE_KEY = 'moyu.audit.v1'
 const STORE_LIMIT = 2000
 
 export class Audit {

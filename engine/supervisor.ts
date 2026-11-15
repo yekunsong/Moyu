@@ -1,5 +1,5 @@
-// One bridge child process, its handshake, health and restart policy.
-// The bridge owns Chromium; this class only supervises the bridge.
+// One child process behind an adapter, its handshake, health and restart
+// policy. Kept for process-owning adapters; the novel provider has none.
 import { fetchJson } from './adapter'
 import type { Ops } from './ops'
 
@@ -26,7 +26,11 @@ export class Supervisor {
   #onFatal: (reason: string) => void = () => {}
   #onIdle: () => void = () => {}
 
-  constructor(private readonly ops: Ops) {}
+  readonly #script: string
+
+  constructor(private readonly ops: Ops, script?: string) {
+    this.#script = script ?? 'bridge/bridge.mjs'
+  }
 
   get phase(): Phase {
     return this.#phase
@@ -68,7 +72,7 @@ export class Supervisor {
     const chrome = processEnvChrome()
     if (chrome) env.TRANSOM_CHROME = chrome
     const stream = this.ops.spawn({
-      argv: [nodePath(), `${this.ops.root}/bridge/bridge.mjs`],
+      argv: [nodePath(), this.#script.startsWith('/') || /^[A-Za-z]:/.test(this.#script) ? this.#script : `${this.ops.root}/${this.#script}`],
       env,
     }) as Stream
     this.#stream = stream
@@ -201,7 +205,7 @@ export class Supervisor {
     }
   }
 
-  /** Runs one health probe now; exposed for tests and `/transom status`. */
+  /** Runs one health probe now; exposed for tests and a status probe. */
   async probe(): Promise<void> {
     await this.#check()
   }

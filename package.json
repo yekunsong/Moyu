@@ -1,17 +1,37 @@
 {
-  "name": "transom",
-  "version": "0.2.0",
+  "name": "moyu",
+  "version": "0.4.0",
   "private": true,
-  "description": "Claude Code mod: a side pane for any app, with one structured snapshot/act channel shared by people and the model.",
+  "description": "moyu: a novel reader that hides in plain sight inside Claude Code.",
   "type": "module",
   "scripts": {
     "typecheck": "npx --yes --package typescript@5 tsc -p .",
     "validate": "claude plugin validate .",
     "test:plugin": "claude plugin test .",
-    "test:bridge": "node --test tests/bridge/bridge.test.mjs tests/bridge/portability.test.mjs",
-    "test": "npm run typecheck && npm run validate && npm run test:plugin && npm run test:bridge",
-    "demo": "node demo/server.mjs",
+    "test": "npm run typecheck && npm run validate && npm run test:plugin",
     "icon": "node scripts/make-icon.mjs"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "author": "moyu contributors",
+  "homepage": "https://github.com/yekunsong/Moyu#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yekunsong/Moyu.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yekunsong/Moyu/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "novel-reader",
+    "terminal",
+    "tui",
+    "boss-key",
+    "reading",
+    "productivity"
+  ],
+  "engines": {
+    "node": ">=22"
+  }
 }

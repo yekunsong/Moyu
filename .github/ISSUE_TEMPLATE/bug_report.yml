@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in the pane, parser, guard or tools is wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove novel text you do not want public.
+  - type: input
+    id: version
+    attributes:
+      label: moyu version and Claude Code build
+      placeholder: "moyu 0.4.0, claude 2.1.322"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Terminal, OS and layout
+      placeholder: "Windows Terminal, Windows 11, fullscreen (NO_FLICKER=1)"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. /moyu ...
+        2. press ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Errors, the audit view (`/moyu` closes; audit rows are in the pane status), or a screenshot.
+      render: text

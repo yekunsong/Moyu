@@ -29,14 +29,6 @@ export async function fetchJson<T>(
   return JSON.parse(response.text) as T
 }
 
-export async function ask(ops: Ops, question: string, options: string[]): Promise<string | undefined> {
-  try {
-    return await ops.ask(question, options)
-  } catch {
-    return undefined
-  }
-}
-
 export async function storeGet<T>(ops: Ops, key: string): Promise<T | undefined> {
   return (await ops.storeGet(key)) as T | undefined
 }

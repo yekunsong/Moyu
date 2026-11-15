@@ -1,42 +1,52 @@
 {
-  "name": "transom",
-  "version": "0.2.0",
-  "description": "A side pane for any app: one structured snapshot/act channel shared by people and the model.",
+  "name": "moyu",
+  "version": "0.4.0",
+  "description": "A novel reader in the session: plain-text prose, shared annotations, a boss key.",
   "author": {
-    "name": "Transom contributors"
+    "name": "moyu contributors",
+    "url": "https://github.com/yekunsong"
   },
   "license": "MIT",
   "types": "./types/index.d.ts",
   "hooks": "./hooks/hooks.json",
   "userConfig": {
-    "allowedHosts": {
+    "libraryRoot": {
       "type": "string",
-      "title": "Allowed hosts",
-      "description": "Comma-separated hostnames the browser provider may visit. localhost and 127.0.0.1 are always allowed.",
-      "default": "localhost,127.0.0.1"
+      "title": "Library root",
+      "description": "Directory the novel pane may open. Relative paths resolve from the working directory; .txt, .md and .text files only, and nothing outside it.",
+      "default": "novels"
     },
-    "writePolicy": {
+    "theme": {
       "type": "string",
-      "title": "Write actions",
-      "description": "How model-issued writes are confirmed: confirm (each), once (first per session), auto.",
-      "default": "confirm",
+      "title": "Theme",
+      "description": "auto follows your own session colours; mono, paper or ink set a preset while the pane is shown.",
+      "default": "auto",
       "options": [
-        "confirm",
-        "once",
-        "auto"
+        "auto",
+        "mono",
+        "paper",
+        "ink"
       ]
+    },
+    "autoHideSeconds": {
+      "type": "number",
+      "title": "Auto-hide",
+      "description": "Hide the pane after this many seconds without a key or turn. 0 keeps it open.",
+      "default": 0
     },
     "snapshotMaxChars": {
       "type": "number",
-      "title": "Snapshot character cap",
-      "description": "Hard cap on a snapshot handed to the model.",
+      "title": "Read cap",
+      "description": "Hard cap on the text one novel_read hands the model.",
       "default": 12000
-    },
-    "hqDetail": {
-      "type": "number",
-      "title": "HQ capture detail",
-      "description": "Pixel density for hq frames: 1 (fast), 2 (default) or 3 (sharp). Higher detail costs CPU and disk.",
-      "default": 2
     }
-  }
+  },
+  "homepage": "https://github.com/yekunsong/Moyu#readme",
+  "repository": "https://github.com/yekunsong/Moyu",
+  "keywords": [
+    "claude-code",
+    "novel-reader",
+    "tui",
+    "boss-key"
+  ]
 }
